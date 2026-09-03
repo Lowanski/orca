@@ -32,8 +32,10 @@ import { WorktreeDeveloperMenu } from './WorktreeDeveloperMenu'
 import { WorkspaceSleepMenuItems } from './WorkspaceSleepMenuItems'
 import { isEventTargetInsideCurrentTarget } from './worktree-card-dom-events'
 import { translate } from '@/i18n/i18n'
+import { normalizeWorkspaceColorTag } from '../../../../shared/workspace-color-tag'
 import { useOptionalShortcutLabel } from '@/hooks/useShortcutLabel'
 import type { WorktreeContextMenuModel } from './use-worktree-context-menu-model'
+import { WorktreeColorTagMenuItems } from './WorktreeColorTagMenuItems'
 import { WorktreeStatusMenuItems } from './WorktreeStatusMenuItems'
 import { WorktreeContextMenuOverlays } from './WorktreeContextMenuOverlays'
 import {
@@ -61,6 +63,7 @@ export default function WorktreeContextMenuView({ model }: { model: WorktreeCont
     eligibleParentCount,
     effectiveSelectedWorktrees,
     folderWorkspaceId,
+    handleAssignColorTag,
     handleAssignWorkspaceStatus,
     handleCloseAutoFocus,
     handleCloseTerminals,
@@ -156,6 +159,13 @@ export default function WorktreeContextMenuView({ model }: { model: WorktreeCont
           <DropdownMenuLabel className="px-2 py-1 text-[11px] font-medium text-muted-foreground">
             {translate('auto.components.sidebar.WorktreeContextMenu.workspaceSection', 'Workspace')}
           </DropdownMenuLabel>
+          <WorktreeColorTagMenuItems
+            colorTag={normalizeWorkspaceColorTag(worktree.colorTag)}
+            disabled={isDeleting}
+            isMultiContext={isMultiContext}
+            onAssignColorTag={handleAssignColorTag}
+          />
+          <DropdownMenuSeparator />
           {!isMultiContext && (
             <DropdownMenuItem onSelect={handleRename} disabled={isDeleting}>
               <Pencil className="size-3.5" />

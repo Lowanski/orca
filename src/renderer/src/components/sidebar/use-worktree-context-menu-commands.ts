@@ -48,6 +48,20 @@ export function useWorktreeContextMenuCommands(args: {
       { executionHostId: args.worktree.hostId ?? 'local' }
     )
   }, [args])
+  const handleAssignColorTag = useCallback(
+    (colorTag: string | null) => {
+      void Promise.all(
+        args.activeContextWorktrees.map((worktree) =>
+          args.updateWorktreeMeta(
+            worktree.id,
+            { colorTag },
+            { executionHostId: worktree.hostId ?? 'local' }
+          )
+        )
+      )
+    },
+    [args]
+  )
   const handleTogglePin = useCallback(() => {
     args.setWorktreesPinnedAndReveal([args.worktree.id], !args.worktree.isPinned)
   }, [args])
@@ -164,6 +178,7 @@ export function useWorktreeContextMenuCommands(args: {
     }
   }, [args.validParentWorktreeId])
   return {
+    handleAssignColorTag,
     handleAssignWorkspaceStatus,
     handleCloseTerminals,
     handleCopyPath,
