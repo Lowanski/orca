@@ -460,7 +460,8 @@
                     "pr": {
                       "suppression": "Update the remote runtime to unlink GitHub pull requests"
                     }
-                  }
+                  },
+                  "colorTag": "Update the remote runtime to set workspace colors"
                 }
               }
             }

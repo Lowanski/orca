@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 import type { useAppStore } from '@/store'
 import type { Repo } from '../../../../shared/repo-types'
 import type { WorkspaceStatusDefinition, Worktree } from '../../../../shared/worktree/types'
@@ -48,17 +48,41 @@ export function useWorktreeContextMenuCommands(args: {
       { executionHostId: args.worktree.hostId ?? 'local' }
     )
   }, [args])
+  // Why coalesce: the custom picker emits a color per pointer move. Writing each one would issue
+  // a metadata write per pixel per selected workspace, and on a slow host an intermediate could
+  // land after the final value. One write set is in flight at a time; when it settles, only the
+  // newest pending value is written, so the disk always converges on what the user last saw.
+  const colorTagWriteRef = useRef<{ inFlight: boolean; pending: string | null | undefined }>({
+    inFlight: false,
+    pending: undefined
+  })
   const handleAssignColorTag = useCallback(
     (colorTag: string | null) => {
-      void Promise.all(
-        args.activeContextWorktrees.map((worktree) =>
-          args.updateWorktreeMeta(
-            worktree.id,
-            { colorTag },
-            { executionHostId: worktree.hostId ?? 'local' }
+      const state = colorTagWriteRef.current
+      state.pending = colorTag
+      if (state.inFlight) {
+        return
+      }
+      const targets = args.activeContextWorktrees
+      const drain = (): void => {
+        const next = state.pending
+        state.pending = undefined
+        if (next === undefined) {
+          state.inFlight = false
+          return
+        }
+        state.inFlight = true
+        void Promise.all(
+          targets.map((worktree) =>
+            args.updateWorktreeMeta(
+              worktree.id,
+              { colorTag: next },
+              { executionHostId: worktree.hostId ?? 'local' }
+            )
           )
-        )
-      )
+        ).then(drain, drain)
+      }
+      drain()
     },
     [args]
   )

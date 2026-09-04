@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { HexColorPicker } from 'react-colorful'
 
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
@@ -10,6 +10,7 @@ import {
 } from '../../../../shared/workspace-color-tag'
 
 const SEED_COLOR = WORKSPACE_COLOR_TAG_SWATCHES[0]
+const FULL_HEX_COLOR_PATTERN = /^#?[0-9a-fA-F]{6}$/
 
 type WorktreeColorTagPickerPopoverProps = {
   open: boolean
@@ -24,6 +25,10 @@ type WorktreeColorTagPickerPopoverProps = {
  * Custom-color surface for the workspace color tag. A Popover rather than a menu submenu so the
  * hex field and the picker's own arrow-key handling are actually reachable — a Radix menu manages
  * its own focus and swallows Tab, leaving non-item content keyboard-dead.
+ *
+ * Every change is forwarded so the card previews live (the store applies metadata optimistically);
+ * the caller coalesces persistence. Closing or pressing Enter forwards the final value once more so
+ * whatever the user last saw is what settles on disk.
  */
 export function WorktreeColorTagPickerPopover({
   open,
@@ -33,28 +38,47 @@ export function WorktreeColorTagPickerPopover({
   onCommitColorTag
 }: WorktreeColorTagPickerPopoverProps): React.JSX.Element {
   const [draft, setDraft] = useState(() => colorTag ?? SEED_COLOR)
+  // Why: the seed is only a starting point for the wheel. Opening and closing without touching
+  // anything must not stamp that seed onto an untagged workspace.
+  const dirtyRef = useRef(false)
 
   useEffect(() => {
     if (open) {
       setDraft(colorTag ?? SEED_COLOR)
+      dirtyRef.current = false
     }
   }, [colorTag, open])
 
-  // Why: react-colorful fires on every pointer move. Persisting each one would issue a metadata
-  // write per pixel — one per selected workspace — and slow hosts could land an intermediate
-  // color after the final one. The drag drives local state only; the commit happens on release.
-  const commit = useCallback(
+  const preview = useCallback(
     (value: string) => {
-      const normalized = normalizeWorkspaceColorTag(value)
-      if (normalized) {
-        onCommitColorTag(normalized)
+      setDraft(value)
+      if (!FULL_HEX_COLOR_PATTERN.test(value.trim())) {
+        return
       }
+      dirtyRef.current = true
+      onCommitColorTag(normalizeWorkspaceColorTag(value))
     },
     [onCommitColorTag]
   )
 
+  const close = useCallback(() => {
+    if (dirtyRef.current && FULL_HEX_COLOR_PATTERN.test(draft.trim())) {
+      onCommitColorTag(normalizeWorkspaceColorTag(draft))
+    }
+    onOpenChange(false)
+  }, [draft, onCommitColorTag, onOpenChange])
+
   return (
-    <Popover open={open} onOpenChange={onOpenChange}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        if (next) {
+          onOpenChange(true)
+          return
+        }
+        close()
+      }}
+    >
       <PopoverAnchor asChild>
         <span
           aria-hidden
@@ -67,18 +91,14 @@ export function WorktreeColorTagPickerPopover({
         className="w-auto space-y-2 p-2"
         onCloseAutoFocus={(event) => event.preventDefault()}
       >
-        <div onPointerUp={() => commit(draft)} onBlur={() => commit(draft)}>
-          <HexColorPicker color={draft} onChange={setDraft} />
-        </div>
+        <HexColorPicker color={draft} onChange={preview} />
         <Input
           value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onBlur={() => commit(draft)}
+          onChange={(event) => preview(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
               event.preventDefault()
-              commit(draft)
-              onOpenChange(false)
+              close()
             }
           }}
           aria-label={translate(

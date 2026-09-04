@@ -6,6 +6,7 @@ import {
 } from '../../../../runtime/runtime-rpc-client'
 import {
   TASK_SOURCE_CONTEXT_RUNTIME_CAPABILITY,
+  WORKSPACE_COLOR_TAG_RUNTIME_CAPABILITY,
   WORKTREE_GITHUB_PR_SUPPRESSION_RUNTIME_CAPABILITY,
   WORKTREE_LINKED_WORK_ITEM_CONTEXT_RUNTIME_CAPABILITY
 } from '../../../../../../shared/protocol-version'
@@ -118,6 +119,18 @@ async function persistWorktreeMetaUntracked(
       translate(
         'auto.store.slices.worktrees.metadata.worktree.meta.persist.4367540861',
         'Update the remote runtime to link Linear issues'
+      )
+    )
+  }
+  // Why fail loud rather than degrade: an older host strips colorTag and still reports success,
+  // so a silent drop would paint the strip and let the next refresh erase it with no explanation.
+  if (target.kind === 'environment' && 'colorTag' in updates) {
+    await assertRuntimeEnvironmentCapability(
+      target.environmentId,
+      WORKSPACE_COLOR_TAG_RUNTIME_CAPABILITY,
+      translate(
+        'auto.store.slices.worktrees.metadata.worktree.meta.persist.colorTag',
+        'Update the remote runtime to set workspace colors'
       )
     )
   }

@@ -75,3 +75,73 @@ describe('workspace color tag assignment', () => {
     )
   })
 })
+
+describe('workspace color tag write coalescing', () => {
+  // Why: the picker emits per pointer move. Without coalescing, a slow host could settle an
+  // intermediate color after the last one the user saw.
+  it('keeps one write set in flight and settles on the newest value', async () => {
+    const resolvers: (() => void)[] = []
+    const updateWorktreeMeta = vi.fn<
+      (id: string, updates: { colorTag: string | null }) => Promise<{ ok: true }>
+    >(
+      () =>
+        new Promise<{ ok: true }>((resolve) => {
+          resolvers.push(() => resolve({ ok: true }))
+        })
+    )
+    const { result } = renderCommands({
+      activeContextWorktrees: [createWorktree('repo::a')],
+      updateWorktreeMeta
+    })
+
+    act(() => {
+      result.current.handleAssignColorTag('#111111')
+      result.current.handleAssignColorTag('#222222')
+      result.current.handleAssignColorTag('#333333')
+    })
+    // Only the first write went out; the two later values were coalesced behind it.
+    expect(updateWorktreeMeta.mock.calls.map((call) => call[1])).toEqual([{ colorTag: '#111111' }])
+
+    await act(async () => {
+      resolvers.shift()?.()
+      await Promise.resolve()
+    })
+    // The in-flight write settled, so exactly the newest pending value follows — not the skipped one.
+    expect(updateWorktreeMeta.mock.calls.map((call) => call[1])).toEqual([
+      { colorTag: '#111111' },
+      { colorTag: '#333333' }
+    ])
+
+    await act(async () => {
+      resolvers.shift()?.()
+      await Promise.resolve()
+    })
+    expect(updateWorktreeMeta).toHaveBeenCalledTimes(2)
+  })
+
+  it('resumes writing after a rejected write instead of wedging', async () => {
+    const updateWorktreeMeta = vi
+      .fn<(id: string, updates: { colorTag: string | null }) => Promise<{ ok: true }>>()
+      .mockRejectedValueOnce(new Error('host away'))
+      .mockResolvedValue({ ok: true })
+    const { result } = renderCommands({
+      activeContextWorktrees: [createWorktree('repo::a')],
+      updateWorktreeMeta
+    })
+
+    act(() => result.current.handleAssignColorTag('#111111'))
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    act(() => result.current.handleAssignColorTag('#222222'))
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(updateWorktreeMeta.mock.calls.map((call) => call[1])).toEqual([
+      { colorTag: '#111111' },
+      { colorTag: '#222222' }
+    ])
+  })
+})
