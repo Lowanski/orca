@@ -24,7 +24,8 @@ const POINT = { x: 10, y: 20 }
 function args(
   contextWorktrees: readonly Worktree[],
   onAssignColorTag = vi.fn(),
-  restoreMenuFocus = vi.fn()
+  restoreMenuFocus = vi.fn(),
+  onActiveChange = vi.fn()
 ) {
   return {
     contextWorktrees,
@@ -32,7 +33,8 @@ function args(
     disabled: false,
     isMultiContext: contextWorktrees.length > 1,
     onAssignColorTag,
-    restoreMenuFocus
+    restoreMenuFocus,
+    onActiveChange
   }
 }
 
@@ -149,5 +151,61 @@ describe('workspace color tag picker selection snapshot', () => {
     )
     expect(result.current.mixed).toBe(true)
     expect(result.current.sharedColorTag).toBeNull()
+  })
+})
+
+describe('workspace color tag picker menu lifecycle', () => {
+  afterEach(() => vi.useRealTimers())
+
+  type PickerProps = { onOpenChange: (open: boolean) => void }
+
+  // Regression: an Agent Map host completes the menu lifecycle on a 0 ms timer once the menu
+  // closes. The model must be told a picker is pending before that, or it tears the host down
+  // before the handoff can open the popover.
+  it('marks the model active the moment the custom swatch is chosen', () => {
+    vi.useFakeTimers()
+    const onActiveChange = vi.fn()
+    const { result } = renderHook(() =>
+      useWorktreeColorTagPicker(args([worktree(null)], vi.fn(), vi.fn(), onActiveChange))
+    )
+
+    act(() => result.current.openPicker())
+
+    expect(onActiveChange).toHaveBeenCalledWith(true)
+    expect(onActiveChange).not.toHaveBeenCalledWith(false)
+  })
+
+  it('releases the model only after the popover has had time to animate out', () => {
+    vi.useFakeTimers()
+    const onActiveChange = vi.fn()
+    const { result, rerender } = renderHook(() =>
+      useWorktreeColorTagPicker(args([worktree(null)], vi.fn(), vi.fn(), onActiveChange))
+    )
+    act(() => result.current.openPicker())
+    act(() => vi.advanceTimersByTime(250))
+    rerender()
+
+    act(() => (result.current.picker.props as PickerProps).onOpenChange(false))
+    expect(onActiveChange).not.toHaveBeenCalledWith(false)
+
+    act(() => vi.advanceTimersByTime(200))
+    expect(onActiveChange).toHaveBeenLastCalledWith(false)
+  })
+
+  it('does not release the model if the picker is reopened during the hold', () => {
+    vi.useFakeTimers()
+    const onActiveChange = vi.fn()
+    const { result, rerender } = renderHook(() =>
+      useWorktreeColorTagPicker(args([worktree(null)], vi.fn(), vi.fn(), onActiveChange))
+    )
+    act(() => result.current.openPicker())
+    act(() => vi.advanceTimersByTime(250))
+    rerender()
+    act(() => (result.current.picker.props as PickerProps).onOpenChange(false))
+    act(() => vi.advanceTimersByTime(100))
+    act(() => result.current.openPicker())
+    act(() => vi.advanceTimersByTime(500))
+
+    expect(onActiveChange).not.toHaveBeenCalledWith(false)
   })
 })

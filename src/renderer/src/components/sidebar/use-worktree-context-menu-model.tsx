@@ -77,6 +77,9 @@ export function useWorktreeContextMenuModel({
     effectiveSelectedWorktrees
   )
   const [createGroupDialogOpen, setCreateGroupDialogOpen] = useState(false)
+  // Why: the color picker opens after the menu closes; without this the lifecycle below completes
+  // and an Agent Map host tears the menu down before the picker's handoff can open it.
+  const [colorPickerActive, setColorPickerActive] = useState(false)
   const createGroupDialogActiveRef = useRef(false)
   const [parentPicker, setParentPicker] = useState<{
     childWorktreeId: string
@@ -247,6 +250,7 @@ export function useWorktreeContextMenuModel({
     if (
       !lifecycleStartedRef.current ||
       menuOpen ||
+      colorPickerActive ||
       createGroupDialogOpen ||
       createGroupDialogActiveRef.current ||
       parentPicker !== null ||
@@ -262,7 +266,7 @@ export function useWorktreeContextMenuModel({
       onLifecycleComplete?.()
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [createGroupDialogOpen, menuOpen, onLifecycleComplete, parentPicker])
+  }, [colorPickerActive, createGroupDialogOpen, menuOpen, onLifecycleComplete, parentPicker])
 
   useEffect(() => {
     const closeMenu = (): void => setMenuOpenState(false)
@@ -391,6 +395,7 @@ export function useWorktreeContextMenuModel({
     removesProject,
     repo,
     scopeRef,
+    setColorPickerActive,
     setContextWorktrees,
     setDeveloperMenuRevealed,
     setMenuOpenState,

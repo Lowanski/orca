@@ -9,6 +9,7 @@ import { getWorktreeHostIdentity } from '../../../../shared/worktree/host-qualif
 import { DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { WorktreeColorTagMenuItems } from './WorktreeColorTagMenuItems'
 import { WorktreeColorTagPickerPopover } from './WorktreeColorTagPickerPopover'
+import { PARENT_PICKER_EXIT_ANIMATION_MS } from './worktree-context-menu-policy'
 
 // Why: the menu plays an exit animation, and Radix fires onCloseAutoFocus only once it finishes.
 // A picker opened before that runs gets its focus yanked to the sidebar by the menu's own focus
@@ -26,6 +27,8 @@ type WorktreeColorTagPickerArgs = {
   onAssignColorTag: (colorTag: string | null, targets: readonly Worktree[]) => void
   /** The menu's own focus restore, run only when no picker is pending. */
   restoreMenuFocus: (event: Event) => void
+  /** Tells the menu model a picker is pending or open, so its lifecycle does not complete under it. */
+  onActiveChange: (active: boolean) => void
 }
 
 /**
@@ -42,7 +45,8 @@ export function useWorktreeColorTagPicker({
   disabled,
   isMultiContext,
   onAssignColorTag,
-  restoreMenuFocus
+  restoreMenuFocus,
+  onActiveChange
 }: WorktreeColorTagPickerArgs): {
   sharedColorTag: string | null
   mixed: boolean
@@ -59,6 +63,7 @@ export function useWorktreeColorTagPicker({
   const [snapshot, setSnapshot] = useState<readonly Worktree[] | null>(null)
   const pendingRef = useRef(false)
   const fallbackTimerRef = useRef<number | null>(null)
+  const inactiveTimerRef = useRef<number | null>(null)
 
   const clearFallback = useCallback(() => {
     if (fallbackTimerRef.current != null) {
@@ -76,14 +81,29 @@ export function useWorktreeColorTagPicker({
     setOpen(true)
   }, [clearFallback])
 
-  useEffect(() => clearFallback, [clearFallback])
+  const clearInactiveTimer = useCallback(() => {
+    if (inactiveTimerRef.current != null) {
+      window.clearTimeout(inactiveTimerRef.current)
+      inactiveTimerRef.current = null
+    }
+  }, [])
+
+  useEffect(
+    () => () => {
+      clearFallback()
+      clearInactiveTimer()
+    },
+    [clearFallback, clearInactiveTimer]
+  )
 
   const openPicker = useCallback(() => {
     setSnapshot(contextWorktrees)
+    clearInactiveTimer()
+    onActiveChange(true)
     pendingRef.current = true
     clearFallback()
     fallbackTimerRef.current = window.setTimeout(flushPendingOpen, CLOSE_AUTO_FOCUS_FALLBACK_MS)
-  }, [clearFallback, contextWorktrees, flushPendingOpen])
+  }, [clearFallback, clearInactiveTimer, contextWorktrees, flushPendingOpen, onActiveChange])
 
   const handleMenuCloseAutoFocus = useCallback(
     (event: Event): void => {
@@ -99,12 +119,23 @@ export function useWorktreeColorTagPicker({
     [flushPendingOpen, restoreMenuFocus]
   )
 
-  const handleOpenChange = useCallback((next: boolean) => {
-    setOpen(next)
-    if (!next) {
+  const handleOpenChange = useCallback(
+    (next: boolean) => {
+      setOpen(next)
+      if (next) {
+        return
+      }
       setSnapshot(null)
-    }
-  }, [])
+      // Why hold: releasing the model the instant open flips would let an Agent Map host unmount
+      // the popover mid exit animation; the parent picker holds its subtree for the same reason.
+      clearInactiveTimer()
+      inactiveTimerRef.current = window.setTimeout(() => {
+        inactiveTimerRef.current = null
+        onActiveChange(false)
+      }, PARENT_PICKER_EXIT_ANIMATION_MS)
+    },
+    [clearInactiveTimer, onActiveChange]
+  )
 
   const contextTags = useMemo(
     () => contextWorktrees.map((item) => item.colorTag),
@@ -160,6 +191,7 @@ export function useWorktreeColorTagPicker({
         previewIdentities={previewIdentities}
         onOpenChange={handleOpenChange}
         onCommitColorTag={commitPickerColorTag}
+        onRestoreFocus={restoreMenuFocus}
       />
     )
   }

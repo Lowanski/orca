@@ -91,6 +91,7 @@ export default function WorktreeContextMenuView({ model }: { model: WorktreeCont
     removesProject,
     repo,
     scopeRef,
+    setColorPickerActive,
     setContextWorktrees,
     setDeveloperMenuRevealed,
     setMenuOpenState,
@@ -110,7 +111,8 @@ export default function WorktreeContextMenuView({ model }: { model: WorktreeCont
     disabled: deletingContext,
     isMultiContext,
     onAssignColorTag: handleAssignColorTag,
-    restoreMenuFocus: handleCloseAutoFocus
+    restoreMenuFocus: handleCloseAutoFocus,
+    onActiveChange: setColorPickerActive
   })
   return (
     <div

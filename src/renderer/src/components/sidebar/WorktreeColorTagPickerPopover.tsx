@@ -9,12 +9,11 @@ import {
   WORKSPACE_COLOR_TAG_SWATCHES
 } from '../../../../shared/workspace-color-tag'
 import {
-  clearWorkspaceColorTagPreview,
-  setWorkspaceColorTagPreview
+  clearWorkspaceColorTagPreviews,
+  setWorkspaceColorTagPreviews
 } from './workspace-color-tag-preview'
 
 const SEED_COLOR = WORKSPACE_COLOR_TAG_SWATCHES[0]
-const FULL_HEX_COLOR_PATTERN = /^#?[0-9a-fA-F]{6}$/
 
 type WorktreeColorTagPickerPopoverProps = {
   open: boolean
@@ -25,6 +24,79 @@ type WorktreeColorTagPickerPopoverProps = {
   previewIdentities: readonly string[]
   onOpenChange: (open: boolean) => void
   onCommitColorTag: (colorTag: string | null) => void
+  /** Runs as the popover closes; hands focus back to the sidebar the way the menu does. */
+  onRestoreFocus: (event: Event) => void
+}
+
+type WorktreeColorTagPickerFieldsProps = {
+  initialColor: string
+  previewIdentities: readonly string[]
+  /** The last complete color the card was shown; the popover commits this on close. */
+  lastValidRef: React.MutableRefObject<string | null>
+  onCommit: () => void
+}
+
+/**
+ * The wheel and hex field. Mounted fresh on every open — Radix unmounts popover content on close —
+ * so the draft starts from the current tag without any reset-on-prop-change effect.
+ */
+function WorktreeColorTagPickerFields({
+  initialColor,
+  previewIdentities,
+  lastValidRef,
+  onCommit
+}: WorktreeColorTagPickerFieldsProps): React.JSX.Element {
+  // draft is whatever the field holds, complete or not; lastValid is the color the card is showing.
+  // Why keep both: the wheel and the commit must never see a half-typed `#1`, but the field must
+  // still echo exactly what the user typed. An untouched open leaves lastValid null so the seed is
+  // never stamped onto an untagged workspace.
+  const [draft, setDraft] = useState(initialColor)
+  const [lastValid, setLastValid] = useState<string | null>(null)
+
+  useEffect(() => {
+    lastValidRef.current = null
+  }, [lastValidRef])
+
+  const preview = useCallback(
+    (value: string) => {
+      setDraft(value)
+      // Why the shared normalizer: it is the model's own definition of a complete color, so `#abc`
+      // previews exactly as it would persist while a half-typed `#ab` does not.
+      const normalized = normalizeWorkspaceColorTag(value)
+      if (!normalized) {
+        return
+      }
+      setLastValid(normalized)
+      lastValidRef.current = normalized
+      setWorkspaceColorTagPreviews(previewIdentities, normalized)
+    },
+    [lastValidRef, previewIdentities]
+  )
+
+  // The wheel only ever renders a complete color: the draft if it parses, else the last one that did.
+  const wheelColor = normalizeWorkspaceColorTag(draft) ?? lastValid ?? initialColor
+
+  return (
+    // Why here: Radix focuses the wheel first, and a keyboard user who just set a hue with the
+    // arrows expects Enter to commit from there, not only from the field.
+    <div
+      className="space-y-2"
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          onCommit()
+        }
+      }}
+    >
+      <HexColorPicker color={wheelColor} onChange={preview} />
+      <Input
+        value={draft}
+        onChange={(event) => preview(event.target.value)}
+        aria-label={translate('auto.components.sidebar.WorktreeColorTagMenuItems.hex', 'Hex color')}
+        className="h-7 w-full text-xs"
+      />
+    </div>
+  )
 }
 
 /**
@@ -33,8 +105,8 @@ type WorktreeColorTagPickerPopoverProps = {
  * its own focus and swallows Tab, leaving non-item content keyboard-dead.
  *
  * Every change previews on the card through a transient channel — no metadata write per move.
- * Closing or pressing Enter commits the final value once, so whatever the user last saw is what
- * settles on disk.
+ * Leaving the popover or pressing Enter commits the last complete color once; Escape backs out and
+ * the card returns to its persisted color.
  */
 export function WorktreeColorTagPickerPopover({
   open,
@@ -42,54 +114,38 @@ export function WorktreeColorTagPickerPopover({
   menuPoint,
   previewIdentities,
   onOpenChange,
-  onCommitColorTag
+  onCommitColorTag,
+  onRestoreFocus
 }: WorktreeColorTagPickerPopoverProps): React.JSX.Element {
-  const [draft, setDraft] = useState(() => colorTag ?? SEED_COLOR)
-  // Why: the seed is only a starting point for the wheel. Opening and closing without touching
-  // anything must not stamp that seed onto an untagged workspace.
-  const dirtyRef = useRef(false)
+  const lastValidRef = useRef<string | null>(null)
 
-  const clearPreviews = useCallback(() => {
-    for (const identity of previewIdentities) {
-      clearWorkspaceColorTagPreview(identity)
-    }
-  }, [previewIdentities])
-
-  useEffect(() => {
-    if (open) {
-      setDraft(colorTag ?? SEED_COLOR)
-      dirtyRef.current = false
-    }
-  }, [colorTag, open])
-
-  // Why: a card that unmounts mid-drag must not leave its preview pinned in the channel.
-  useEffect(() => clearPreviews, [clearPreviews])
-
-  const preview = useCallback(
-    (value: string) => {
-      setDraft(value)
-      if (!FULL_HEX_COLOR_PATTERN.test(value.trim())) {
-        return
-      }
-      const normalized = normalizeWorkspaceColorTag(value)
-      if (!normalized) {
-        return
-      }
-      dirtyRef.current = true
-      for (const identity of previewIdentities) {
-        setWorkspaceColorTagPreview(identity, normalized)
-      }
-    },
+  const clearPreviews = useCallback(
+    () => clearWorkspaceColorTagPreviews(previewIdentities),
     [previewIdentities]
   )
 
-  const close = useCallback(() => {
-    if (dirtyRef.current && FULL_HEX_COLOR_PATTERN.test(draft.trim())) {
-      onCommitColorTag(normalizeWorkspaceColorTag(draft))
+  // Why gate on open: every card mounts one of these. A closed bystander that unmounts — the list
+  // is virtualized — must not clear the previews an open picker on another card is driving.
+  useEffect(() => {
+    if (!open) {
+      return undefined
+    }
+    return clearPreviews
+  }, [clearPreviews, open])
+
+  const commitAndClose = useCallback(() => {
+    if (lastValidRef.current) {
+      onCommitColorTag(lastValidRef.current)
     }
     clearPreviews()
     onOpenChange(false)
-  }, [clearPreviews, draft, onCommitColorTag, onOpenChange])
+  }, [clearPreviews, onCommitColorTag, onOpenChange])
+
+  // Why: Escape backs out. The draft is dropped and nothing is written.
+  const cancel = useCallback(() => {
+    clearPreviews()
+    onOpenChange(false)
+  }, [clearPreviews, onOpenChange])
 
   return (
     <Popover
@@ -99,7 +155,7 @@ export function WorktreeColorTagPickerPopover({
           onOpenChange(true)
           return
         }
-        close()
+        commitAndClose()
       }}
     >
       <PopoverAnchor asChild>
@@ -111,24 +167,18 @@ export function WorktreeColorTagPickerPopover({
       </PopoverAnchor>
       <PopoverContent
         align="start"
-        className="w-auto space-y-2 p-2"
-        onCloseAutoFocus={(event) => event.preventDefault()}
+        className="w-auto p-2"
+        onEscapeKeyDown={(event) => {
+          event.preventDefault()
+          cancel()
+        }}
+        onCloseAutoFocus={onRestoreFocus}
       >
-        <HexColorPicker color={draft} onChange={preview} />
-        <Input
-          value={draft}
-          onChange={(event) => preview(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault()
-              close()
-            }
-          }}
-          aria-label={translate(
-            'auto.components.sidebar.WorktreeColorTagMenuItems.hex',
-            'Hex color'
-          )}
-          className="h-7 w-full text-xs"
+        <WorktreeColorTagPickerFields
+          initialColor={colorTag ?? SEED_COLOR}
+          previewIdentities={previewIdentities}
+          lastValidRef={lastValidRef}
+          onCommit={commitAndClose}
         />
       </PopoverContent>
     </Popover>

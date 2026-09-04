@@ -17,16 +17,33 @@ function emit(): void {
   }
 }
 
-export function setWorkspaceColorTagPreview(identity: string, colorTag: string): void {
-  if (previews.get(identity) === colorTag) {
-    return
+// Why batch: a drag fires per pointer move across every selected card, and every mounted card
+// subscribes. Mutating the whole set and notifying once keeps that at one broadcast per move
+// instead of selected × rendered.
+export function setWorkspaceColorTagPreviews(
+  identities: readonly string[],
+  colorTag: string
+): void {
+  let changed = false
+  for (const identity of identities) {
+    if (previews.get(identity) !== colorTag) {
+      previews.set(identity, colorTag)
+      changed = true
+    }
   }
-  previews.set(identity, colorTag)
-  emit()
+  if (changed) {
+    emit()
+  }
 }
 
-export function clearWorkspaceColorTagPreview(identity: string): void {
-  if (previews.delete(identity)) {
+export function clearWorkspaceColorTagPreviews(identities: readonly string[]): void {
+  let changed = false
+  for (const identity of identities) {
+    if (previews.delete(identity)) {
+      changed = true
+    }
+  }
+  if (changed) {
     emit()
   }
 }

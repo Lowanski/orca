@@ -5,6 +5,7 @@ import { DropdownMenuItem } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
 import {
+  isPresetWorkspaceColorTag,
   resolveWorkspaceColorTagSelection,
   WORKSPACE_COLOR_TAG_SWATCHES
 } from '../../../../shared/workspace-color-tag'
@@ -39,7 +40,12 @@ type WorktreeColorTagMenuItemsProps = {
 
 function getInitialSwatchIndex(colorTag: string | null): number {
   const index = SWATCH_OPTIONS.indexOf(colorTag)
-  return index === -1 ? 0 : index
+  if (index !== -1) {
+    return index
+  }
+  // Why: a stored custom color lives behind the wheel. Landing on the empty slot instead would
+  // make Enter on the row clear the tag the user is looking at.
+  return colorTag === null ? 0 : SWATCH_OPTIONS.indexOf(CUSTOM_SWATCH)
 }
 
 function getSwatchKey(swatch: SwatchOption): string {
@@ -80,7 +86,15 @@ export function WorktreeColorTagMenuItems({
   const activeIndexRef = useRef(activeIndex)
 
   const isSwatchSelected = useCallback(
-    (swatch: SwatchOption): boolean => !mixed && swatch !== CUSTOM_SWATCH && swatch === colorTag,
+    (swatch: SwatchOption): boolean => {
+      if (mixed) {
+        return false
+      }
+      if (swatch === CUSTOM_SWATCH) {
+        return colorTag !== null && !isPresetWorkspaceColorTag(colorTag)
+      }
+      return swatch === colorTag
+    },
     [colorTag, mixed]
   )
 
