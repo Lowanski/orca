@@ -464,6 +464,13 @@
                   "colorTag": "Update the remote runtime to set workspace colors"
                 }
               }
+            },
+            "update": {
+              "worktree": {
+                "meta": {
+                  "identityGone": "This workspace is no longer available."
+                }
+              }
             }
           },
           "createdWithoutParentNesting": "Created without nesting under \"{{value0}}\"",

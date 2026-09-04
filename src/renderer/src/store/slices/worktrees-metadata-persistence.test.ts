@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { toRuntimeExecutionHostId } from '../../../../shared/execution-host'
 import type { AppState } from '../types'
 import { toast } from 'sonner'
 import type { RuntimeEnvironmentCallRequest } from '../../runtime/runtime-compatibility-test-fixture'
@@ -522,5 +523,68 @@ describe('identity-pinned worktree metadata writes', () => {
       null,
       '#ef4444'
     ])
+  })
+})
+
+describe('identity-pinned writes when the row is gone or the write fails', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetRemoteRuntimeMocks()
+  })
+
+  // Regression: an explicit identity that matched nothing fell back to the mutable id-and-host
+  // locator; the identity-filtered optimistic apply changed nothing, but local persistence carries
+  // no identity, so the color landed on whatever now occupied the path.
+  it('reports not-found for an identity that matches no row and writes nothing', async () => {
+    const store = createTestStore()
+    const row = makeWorktree({
+      id: 'repo1::/path/reused',
+      repoId: 'repo1',
+      path: '/path/reused',
+      identity: { key: 'k-new' } as never,
+      colorTag: null
+    })
+    store.setState({ worktreesByRepo: { repo1: [row] } } as Partial<AppState>)
+
+    const result = await store
+      .getState()
+      .updateWorktreeMeta(row.id, { colorTag: '#ef4444' }, { identityKey: 'k-gone' })
+
+    expect(result.ok).toBe(false)
+    expect(mockApi.worktrees.updateMeta).not.toHaveBeenCalled()
+    expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
+    expect(store.getState().worktreesByRepo.repo1[0]?.colorTag).toBeNull()
+  })
+
+  // Regression: after a pinned write failed, recovery refetched without the owner, so it followed
+  // the focused HUB (or was rejected as ambiguous) and the failed optimistic color stayed visible.
+  it('recovers through the pinned runtime when its write is rejected', async () => {
+    const store = createTestStore()
+    const shared = makeWorktree({
+      id: 'repo1::/path/shared',
+      repoId: 'repo1',
+      path: '/path/shared'
+    })
+    const viaB = {
+      ...shared,
+      identity: { key: 'k-b' } as never,
+      runtimeOwnerEnvironmentId: 'env-b'
+    }
+    runtimeEnvironmentCall.mockRejectedValue(new Error('hub b away'))
+    const fetchWorktrees = vi.fn().mockResolvedValue(undefined)
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-a' } as never,
+      worktreesByRepo: { repo1: [viaB] },
+      fetchWorktrees
+    } as unknown as Partial<AppState>)
+
+    const result = await store
+      .getState()
+      .updateWorktreeMeta(shared.id, { colorTag: '#ef4444' }, { identityKey: 'k-b' })
+
+    expect(result.ok).toBe(false)
+    expect(fetchWorktrees).toHaveBeenCalledWith('repo1', {
+      executionHostId: toRuntimeExecutionHostId('env-b')
+    })
   })
 })

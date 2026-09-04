@@ -1,8 +1,8 @@
+import { toRuntimeExecutionHostId } from '../../../../../../shared/execution-host'
 import type { Worktree } from '../../../../../../shared/worktree/types'
 import type { WorktreeSlice } from '../../worktree-helpers'
 import type { WorktreeSliceGet, WorktreeSliceSet } from '../listing/worktree-slice-types'
 import { translate } from '@/i18n/i18n'
-import { isPositiveHostedReviewNumber } from '../../../../../../shared/hosted-review'
 import { displayNameUpdatePinsLabel } from '../../../../../../shared/worktree/display-name-provenance'
 import { parseWorkspaceKey } from '../../../../../../shared/workspace-scope'
 import { applyWorktreeUpdates, getRepoIdFromWorktreeId } from '../../worktree-helpers'
@@ -20,17 +20,14 @@ import {
   hasHostedReviewLinkUpdates
 } from './hosted-review-link-mutation'
 import { normalizeHostedReviewLinkReplacementUpdates } from './hosted-review-link-update-normalization'
-import {
-  getHostedReviewPushTargetLookup,
-  resolveGitHubReviewPushTarget
-} from './hosted-review-push-target'
+import type {} from './hosted-review-push-target'
 import { persistWorktreeMeta } from './worktree-meta-persist'
+import { resolveHostedReviewPushTargetUpdate } from './hosted-review-push-target-resolution'
 import { updateFolderWorkspaceMeta } from './update-folder-workspace-meta'
 import { isRuntimeSelectorNotFoundError } from '../listing/runtime-worktree-rpc-errors'
 import {
   settingsForRuntimeEnvironmentOwner,
-  settingsForWorktreeOwner,
-  trySettingsForWorktreeOwner
+  settingsForWorktreeOwner
 } from '../listing/worktree-owner-settings'
 
 import { findRepoForHost } from '../../repo-host-identity'
@@ -44,9 +41,21 @@ export function createUpdateWorktreeMeta(
     // Why: two paired runtimes can publish one checkout as two rows with the same id and host; a
     // caller that knows the exact row pins it so lookup, optimistic apply, and persistence agree.
     const requestedIdentityKey = options?.identityKey
+    const identityMatch = findKnownWorktreeByIdentityKey(get(), worktreeId, requestedIdentityKey)
+    // Why not fall back: the locator is mutable — the row may be gone or its path reused — and local
+    // persistence carries no identity, so a fallback would stamp the value on whatever occupies the
+    // path now, or recreate metadata for a deleted workspace.
+    if (requestedIdentityKey !== undefined && !identityMatch) {
+      return {
+        ok: false,
+        error: translate(
+          'auto.store.slices.worktrees.metadata.update.worktree.meta.identityGone',
+          'This workspace is no longer available.'
+        )
+      }
+    }
     const existingWorktree =
-      findKnownWorktreeByIdentityKey(get(), worktreeId, requestedIdentityKey) ??
-      findKnownWorktreeById(get(), worktreeId, requestedHostId)
+      identityMatch ?? findKnownWorktreeById(get(), worktreeId, requestedHostId)
     const executionHostId =
       requestedHostId ??
       existingWorktree?.hostId ??
@@ -64,42 +73,16 @@ export function createUpdateWorktreeMeta(
       )
     }
     const normalizedUpdates = normalizeHostedReviewLinkReplacementUpdates(updates, existingWorktree)
-    // Why: manual PR linking supplies only the number; resolve the head branch so Push targets the review branch.
-    const linkedPrForPushTarget = isPositiveHostedReviewNumber(normalizedUpdates.linkedPR)
-      ? normalizedUpdates.linkedPR
-      : null
-    // Why: an ambiguous owner must not throw past this update's { ok, error } contract — skip the lookup instead.
-    const pushTargetOwnerSettings =
-      linkedPrForPushTarget !== null &&
-      normalizedUpdates.pushTarget === undefined &&
-      existingWorktree &&
-      !existingWorktree.pushTarget
-        ? trySettingsForWorktreeOwner(get(), worktreeId, executionHostId)
-        : null
-    const resolvedPushTarget =
-      pushTargetOwnerSettings && existingWorktree && linkedPrForPushTarget !== null
-        ? await resolveGitHubReviewPushTarget(
-            pushTargetOwnerSettings,
-            existingWorktree.repoId,
-            linkedPrForPushTarget
-          )
-        : undefined
-    const existingHostedReviewPushTargetLookup = existingWorktree
-      ? getHostedReviewPushTargetLookup(existingWorktree)
-      : null
-    const nextHostedReviewPushTargetLookup = existingWorktree
-      ? getHostedReviewPushTargetLookup({ ...existingWorktree, ...normalizedUpdates })
-      : null
-    // Why: a pushTarget derived from a linked review must not keep steering pushes after it's unlinked or replaced.
-    const shouldClearStaleHostedReviewPushTarget =
-      Boolean(existingWorktree?.pushTarget) &&
-      normalizedUpdates.pushTarget === undefined &&
-      resolvedPushTarget === undefined &&
-      existingHostedReviewPushTargetLookup !== null &&
-      existingHostedReviewPushTargetLookup.key !== nextHostedReviewPushTargetLookup?.key
+    const { resolvedPushTarget, shouldClearStaleHostedReviewPushTarget } =
+      await resolveHostedReviewPushTargetUpdate(
+        get,
+        worktreeId,
+        executionHostId,
+        existingWorktree,
+        normalizedUpdates
+      )
     const worktreeForUpdate =
-      findKnownWorktreeByIdentityKey(get(), worktreeId, requestedIdentityKey) ??
-      get().getKnownWorktreeById(worktreeId, executionHostId)
+      identityMatch ?? get().getKnownWorktreeById(worktreeId, executionHostId)
     if (shouldApplyUpdate && !shouldApplyUpdate(worktreeForUpdate)) {
       return { ok: true }
     }
@@ -239,14 +222,18 @@ export function createUpdateWorktreeMeta(
       bumpHostedReviewLinkMutationGeneration(worktreeId)
     }
 
+    // Why: an identity-pinned row names its own paired runtime; the id-and-host owner lookup could
+    // pick a sibling HUB or local and the pinned HUB would never persist the write. Recovery after a
+    // failure must follow the same owner, or the failed optimistic value stays on screen.
+    const pinnedOwnerEnvironmentId =
+      requestedIdentityKey !== undefined
+        ? (worktreeForUpdate as Partial<Pick<Worktree, 'runtimeOwnerEnvironmentId'>> | undefined)
+            ?.runtimeOwnerEnvironmentId
+        : undefined
+    const recoveryFetchOptions = pinnedOwnerEnvironmentId
+      ? { executionHostId: toRuntimeExecutionHostId(pinnedOwnerEnvironmentId) }
+      : undefined
     try {
-      // Why: an identity-pinned row names its own paired runtime; the id-and-host owner lookup
-      // could pick a sibling HUB or local and the pinned HUB would never persist the write.
-      const pinnedOwnerEnvironmentId =
-        requestedIdentityKey !== undefined
-          ? (worktreeForUpdate as Partial<Pick<Worktree, 'runtimeOwnerEnvironmentId'>> | undefined)
-              ?.runtimeOwnerEnvironmentId
-          : undefined
       await persistWorktreeMeta(
         pinnedOwnerEnvironmentId
           ? settingsForRuntimeEnvironmentOwner(get().settings, pinnedOwnerEnvironmentId)
@@ -296,7 +283,7 @@ export function createUpdateWorktreeMeta(
       }
     } catch (err) {
       if (isRuntimeSelectorNotFoundError(err)) {
-        void get().fetchWorktrees(getRepoIdFromWorktreeId(worktreeId))
+        void get().fetchWorktrees(getRepoIdFromWorktreeId(worktreeId), recoveryFetchOptions)
         return {
           ok: false,
           error: translate(
@@ -306,7 +293,7 @@ export function createUpdateWorktreeMeta(
         }
       }
       console.error('Failed to update worktree meta:', err)
-      void get().fetchWorktrees(getRepoIdFromWorktreeId(worktreeId))
+      void get().fetchWorktrees(getRepoIdFromWorktreeId(worktreeId), recoveryFetchOptions)
       // Why: the refetch above reverts the optimistic write, so a caller that
       // closes its surface on this path shows the user a save that undid itself.
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
