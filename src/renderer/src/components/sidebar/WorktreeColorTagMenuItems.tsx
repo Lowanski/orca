@@ -1,6 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react'
 import { HexColorPicker } from 'react-colorful'
-import { Palette } from 'lucide-react'
+import { Palette, Slash } from 'lucide-react'
 
 import {
   DropdownMenuItem,
@@ -13,11 +13,14 @@ import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
 import {
   normalizeWorkspaceColorTag,
-  WORKSPACE_COLOR_TAG_NONE,
+  resolveWorkspaceColorTagSelection,
   WORKSPACE_COLOR_TAG_SWATCHES
 } from '../../../../shared/workspace-color-tag'
 
 const FULL_HEX_COLOR_PATTERN = /^#?[0-9a-fA-F]{6}$/
+const DRAFT_SEED_COLOR = WORKSPACE_COLOR_TAG_SWATCHES[0]
+// Null is the explicit "no color" slot, so it leads the row rather than hiding behind a gray chip.
+const SWATCH_OPTIONS: readonly (string | null)[] = [null, ...WORKSPACE_COLOR_TAG_SWATCHES]
 
 type WorktreeColorTagMenuItemsProps = {
   colorTag: string | null
@@ -27,14 +30,20 @@ type WorktreeColorTagMenuItemsProps = {
 }
 
 function getInitialSwatchIndex(colorTag: string | null): number {
-  const index =
-    colorTag === null ? -1 : (WORKSPACE_COLOR_TAG_SWATCHES as readonly string[]).indexOf(colorTag)
+  const index = SWATCH_OPTIONS.indexOf(colorTag)
   return index === -1 ? 0 : index
 }
 
-function getSwatchLabel(swatch: string): string {
-  return swatch === WORKSPACE_COLOR_TAG_NONE
-    ? translate('auto.components.sidebar.WorktreeColorTagMenuItems.noColor', 'No color')
+function getSwatchLabel(swatch: string | null, isSelected: boolean): string {
+  if (swatch === null) {
+    return translate('auto.components.sidebar.WorktreeColorTagMenuItems.noColor', 'No color')
+  }
+  return isSelected
+    ? translate(
+        'auto.components.sidebar.WorktreeColorTagMenuItems.removeColor',
+        'Remove color {{value0}}',
+        { value0: swatch }
+      )
     : translate(
         'auto.components.sidebar.WorktreeColorTagMenuItems.useColor',
         'Use color {{value0}}',
@@ -52,11 +61,10 @@ export function WorktreeColorTagMenuItems({
   // Why: the row is one menu stop, so the swatch a click or Enter lands on has to
   // survive into the item's onSelect without waiting for a state re-render.
   const activeIndexRef = useRef(activeIndex)
-  const [draft, setDraft] = useState(() => colorTag ?? WORKSPACE_COLOR_TAG_NONE)
+  const [draft, setDraft] = useState(() => colorTag ?? DRAFT_SEED_COLOR)
 
   const moveActiveIndex = useCallback((index: number) => {
-    const wrapped =
-      (index + WORKSPACE_COLOR_TAG_SWATCHES.length) % WORKSPACE_COLOR_TAG_SWATCHES.length
+    const wrapped = (index + SWATCH_OPTIONS.length) % SWATCH_OPTIONS.length
     activeIndexRef.current = wrapped
     setActiveIndex(wrapped)
   }, [])
@@ -79,6 +87,7 @@ export function WorktreeColorTagMenuItems({
     (value: string) => {
       setDraft(value)
       // Why: assign only on a complete hex so a half-typed "#ab" does not clear the tag.
+      // No toggle here either — re-picking mid-drag must not clear what the drag just set.
       if (FULL_HEX_COLOR_PATTERN.test(value.trim())) {
         onAssignColorTag(normalizeWorkspaceColorTag(value))
       }
@@ -93,7 +102,7 @@ export function WorktreeColorTagMenuItems({
         className="px-2 py-1.5 focus:bg-transparent dark:focus:bg-transparent"
         onSelect={() =>
           onAssignColorTag(
-            normalizeWorkspaceColorTag(WORKSPACE_COLOR_TAG_SWATCHES[activeIndexRef.current])
+            resolveWorkspaceColorTagSelection(colorTag, SWATCH_OPTIONS[activeIndexRef.current])
           )
         }
         onKeyDown={handleRowKeyDown}
@@ -110,29 +119,33 @@ export function WorktreeColorTagMenuItems({
         }
       >
         <div className="flex w-full items-center justify-between gap-1" role="radiogroup">
-          {WORKSPACE_COLOR_TAG_SWATCHES.map((swatch, index) => {
-            const isSelected = swatch === (colorTag ?? WORKSPACE_COLOR_TAG_NONE)
+          {SWATCH_OPTIONS.map((swatch, index) => {
+            const isSelected = swatch === colorTag
             return (
               <button
-                key={swatch}
+                key={swatch ?? 'none'}
                 type="button"
                 role="radio"
                 tabIndex={-1}
                 aria-checked={isSelected}
-                aria-label={getSwatchLabel(swatch)}
+                aria-label={getSwatchLabel(swatch, isSelected)}
+                data-workspace-color-swatch={swatch ?? 'none'}
                 onPointerEnter={() => moveActiveIndex(index)}
                 onClick={() => {
                   activeIndexRef.current = index
                 }}
                 className={cn(
-                  'size-4 rounded-full outline-none transition-shadow',
+                  'flex size-4 items-center justify-center rounded-full outline-none transition-shadow',
+                  swatch === null && 'border border-border text-muted-foreground',
                   isSelected && 'ring-2 ring-foreground ring-offset-2 ring-offset-popover',
                   !isSelected &&
                     index === activeIndex &&
                     'ring-1 ring-muted-foreground ring-offset-2 ring-offset-popover'
                 )}
-                style={{ backgroundColor: swatch }}
-              />
+                style={swatch === null ? undefined : { backgroundColor: swatch }}
+              >
+                {swatch === null ? <Slash className="size-2.5" /> : null}
+              </button>
             )
           })}
         </div>

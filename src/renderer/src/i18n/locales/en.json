@@ -6236,7 +6236,8 @@
           "groupColorMulti": "Group color for selected workspaces",
           "groupColor": "Group color",
           "custom": "Custom color",
-          "hex": "Hex color"
+          "hex": "Hex color",
+          "removeColor": "Remove color {{value0}}"
         }
       },
       "shared": {

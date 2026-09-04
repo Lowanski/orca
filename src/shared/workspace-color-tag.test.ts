@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { DEFAULT_REPO_BADGE_COLOR } from './constants'
 import {
   isPresetWorkspaceColorTag,
   normalizeWorkspaceColorTag,
-  WORKSPACE_COLOR_TAG_NONE,
+  resolveWorkspaceColorTagSelection,
   WORKSPACE_COLOR_TAG_SWATCHES
 } from './workspace-color-tag'
 
@@ -12,11 +13,6 @@ describe('normalizeWorkspaceColorTag', () => {
     expect(normalizeWorkspaceColorTag('#EF4444')).toBe('#ef4444')
     expect(normalizeWorkspaceColorTag('ef4444')).toBe('#ef4444')
     expect(normalizeWorkspaceColorTag('  #ef4444  ')).toBe('#ef4444')
-  })
-
-  it('treats the neutral swatch as "no tag" so it can clear an assigned color', () => {
-    expect(normalizeWorkspaceColorTag(WORKSPACE_COLOR_TAG_NONE)).toBeNull()
-    expect(normalizeWorkspaceColorTag(WORKSPACE_COLOR_TAG_NONE.toUpperCase())).toBeNull()
   })
 
   it('rejects values that are not a hex color', () => {
@@ -34,13 +30,16 @@ describe('normalizeWorkspaceColorTag', () => {
       expect(normalizeWorkspaceColorTag(value)).toBeNull()
     }
   })
+})
 
-  it('keeps every non-neutral swatch in the palette assignable', () => {
-    const assignable = WORKSPACE_COLOR_TAG_SWATCHES.filter(
-      (swatch) => swatch !== WORKSPACE_COLOR_TAG_NONE
-    )
-    expect(assignable.length).toBeGreaterThan(0)
-    for (const swatch of assignable) {
+describe('WORKSPACE_COLOR_TAG_SWATCHES', () => {
+  it('omits neutral, because "no tag" is its own affordance rather than a gray color', () => {
+    expect(WORKSPACE_COLOR_TAG_SWATCHES).not.toContain(DEFAULT_REPO_BADGE_COLOR)
+    expect(WORKSPACE_COLOR_TAG_SWATCHES.length).toBeGreaterThan(0)
+  })
+
+  it('keeps every offered swatch assignable', () => {
+    for (const swatch of WORKSPACE_COLOR_TAG_SWATCHES) {
       expect(normalizeWorkspaceColorTag(swatch)).toBe(swatch)
       expect(isPresetWorkspaceColorTag(swatch)).toBe(true)
     }
@@ -48,6 +47,27 @@ describe('normalizeWorkspaceColorTag', () => {
 
   it('does not report a custom color as a preset', () => {
     expect(isPresetWorkspaceColorTag('#123456')).toBe(false)
-    expect(isPresetWorkspaceColorTag(WORKSPACE_COLOR_TAG_NONE)).toBe(false)
+    expect(isPresetWorkspaceColorTag(DEFAULT_REPO_BADGE_COLOR)).toBe(false)
+  })
+})
+
+describe('resolveWorkspaceColorTagSelection', () => {
+  it('clears the tag when the workspace already carries the picked color', () => {
+    expect(resolveWorkspaceColorTagSelection('#ef4444', '#ef4444')).toBeNull()
+  })
+
+  it('compares normalized values, so shorthand and case still toggle off', () => {
+    expect(resolveWorkspaceColorTagSelection('#ef4444', '#EF4444')).toBeNull()
+    expect(resolveWorkspaceColorTagSelection('#ffffff', '#FFF')).toBeNull()
+  })
+
+  it('replaces the tag when a different color is picked', () => {
+    expect(resolveWorkspaceColorTagSelection('#ef4444', '#22c55e')).toBe('#22c55e')
+    expect(resolveWorkspaceColorTagSelection(null, '#22c55e')).toBe('#22c55e')
+  })
+
+  it('stays cleared when the "no color" slot is picked', () => {
+    expect(resolveWorkspaceColorTagSelection('#ef4444', null)).toBeNull()
+    expect(resolveWorkspaceColorTagSelection(null, null)).toBeNull()
   })
 })

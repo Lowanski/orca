@@ -1,20 +1,30 @@
-import { REPO_COLORS } from './constants'
+import { DEFAULT_REPO_BADGE_COLOR, REPO_COLORS } from './constants'
 import { normalizeHexColor } from './hex-color'
 
-/** Swatches offered in the workspace color-tag picker. Shares the repo palette so
- *  one color language runs across the app. */
-export const WORKSPACE_COLOR_TAG_SWATCHES = REPO_COLORS
+/** Assignable swatches, sharing the repo palette so one color language runs across the app.
+ *  Neutral is excluded: as a filled swatch it reads as a gray tag rather than as absence, so
+ *  "no tag" gets its own empty affordance instead of borrowing a color. */
+export const WORKSPACE_COLOR_TAG_SWATCHES: readonly string[] = REPO_COLORS.filter(
+  (color) => color !== DEFAULT_REPO_BADGE_COLOR
+)
 
-/** The palette's neutral entry doubles as "no tag" — assigning it clears the tag. */
-export const WORKSPACE_COLOR_TAG_NONE = REPO_COLORS[0]
-
-/** Null means "no tag": an unparseable value and the neutral swatch both clear it. */
+/** Null means "no tag". Any value that is not a hex color clears it. */
 export function normalizeWorkspaceColorTag(value: unknown): string | null {
-  const hex = normalizeHexColor(value)
-  return hex === null || hex === WORKSPACE_COLOR_TAG_NONE ? null : hex
+  return normalizeHexColor(value)
 }
 
 export function isPresetWorkspaceColorTag(value: unknown): boolean {
   const hex = normalizeWorkspaceColorTag(value)
-  return hex !== null && WORKSPACE_COLOR_TAG_SWATCHES.some((swatch) => swatch === hex)
+  return hex !== null && WORKSPACE_COLOR_TAG_SWATCHES.includes(hex)
+}
+
+/** Picking the tag a workspace already carries removes it, so one swatch both sets and clears. */
+export function resolveWorkspaceColorTagSelection(
+  current: string | null,
+  chosen: string | null
+): string | null {
+  const normalizedChosen = normalizeWorkspaceColorTag(chosen)
+  return normalizedChosen !== null && normalizedChosen === normalizeWorkspaceColorTag(current)
+    ? null
+    : normalizedChosen
 }
