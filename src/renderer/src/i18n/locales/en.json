@@ -6257,6 +6257,9 @@
           "custom": "Custom color",
           "hex": "Hex color",
           "removeColor": "Remove color {{value0}}"
+        },
+        "WorktreeCardSurface": {
+          "colorTag": "Color tag {{value0}}"
         }
       },
       "shared": {

@@ -103,6 +103,8 @@ describe('WorktreeCard color tag strip', () => {
 
       expect(markup).toContain('data-worktree-card-color-tag="#ef4444"')
       expect(markup).toContain('background-color:#ef4444')
+      // Why: the strip is aria-hidden, so the card's text must carry the tag for assistive tech.
+      expect(markup).toContain('Color tag #ef4444')
     },
     WORKTREE_CARD_IMPORT_TIMEOUT_MS
   )
@@ -117,6 +119,7 @@ describe('WorktreeCard color tag strip', () => {
           <WorktreeCard worktree={makeWorktree({ colorTag })} repo={makeRepo()} isActive={false} />
         )
         expect(markup).not.toContain('data-worktree-card-color-tag')
+        expect(markup).not.toContain('Color tag')
       }
     },
     WORKTREE_CARD_IMPORT_TIMEOUT_MS
