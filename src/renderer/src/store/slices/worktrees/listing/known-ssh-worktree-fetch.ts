@@ -223,6 +223,9 @@ export function acquireDirectSshDetectedWorktreeRefresh(
     requireAuthoritative: request.requireAuthoritative
   }
   const lease = acquireDetectedWorktreeRefreshLeaseForRepo(settings, request.repoId, options)
+  // Why here and not in merge: merge runs after the provider completes, so the first owner would
+  // stamp completion time and a later joiner would look newer than a write that landed mid-scan.
+  const scanStartedAt = rememberLeaseStart(lease.providerRequestId)
   let mergedResult: HostQualifiedDetectedWorktreeResult | undefined
 
   return {
@@ -256,9 +259,7 @@ export function acquireDirectSshDetectedWorktreeRefresh(
       const refresh: AdmittedDetectedWorktreeRefresh = {
         status: 'admitted',
         result: providerResult.result,
-        // Why: a caller that joined this lease started later than the scan it shares; the merge
-        // fences on the scan's start, or a color that landed in between is undone by pre-write data.
-        startedAt: rememberLeaseStart(lease.providerRequestId),
+        startedAt: scanStartedAt,
         providerResult,
         executionHostId: request.executionHostId,
         directSshAuthority: request.authority

@@ -77,10 +77,19 @@ describe('MetaWriteFence', () => {
     expect(fence.isPending('other', 'ssh:box')).toBe(false)
   })
 
-  it('forgets released entries once no live listing could still merge', () => {
+  // Why 120 s: a stale refresh can stay mergeable through a 30 s listing budget plus up to 30 s of
+  // terminal teardown; a shorter window pruned the only guard while such a merge was still pending.
+  it('keeps a released entry through the whole listing-plus-teardown pipeline', () => {
     const { fence, advanceTo } = fenceAt(1000)
     fence.begin('w', 'local').landed()
-    advanceTo(1000 + 30_000 + 1)
+    advanceTo(1000 + 60_000)
+    expect(fence.isPending('w', 'local', 0)).toBe(true)
+  })
+
+  it('forgets released entries once no live refresh could still merge', () => {
+    const { fence, advanceTo } = fenceAt(1000)
+    fence.begin('w', 'local').landed()
+    advanceTo(1000 + 120_000 + 1)
     expect(fence.isPending('w', 'local', 0)).toBe(false)
   })
 })

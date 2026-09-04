@@ -9,10 +9,12 @@ type FenceEntry = {
   releasedAt: number | null
 }
 
-// Why a TTL: a released entry only matters to a listing that began before the write landed, and
-// a listing older than the runtime RPC timeout (15 s) can no longer merge. Doubling that keeps
-// the set bounded without ever expiring an entry a live fetch could still need.
-const RELEASED_ENTRY_TTL_MS = 30_000
+// Why this bound: a released entry only matters to a refresh that began before the write landed,
+// and such a refresh can still be mergeable for the whole pipeline — a listing budget of up to 30 s
+// (local) or 15 s (runtime RPC), then up to 30 s of best-effort terminal teardown before the merge
+// runs. Doubling that worst case keeps the set bounded without expiring an entry a still-pending
+// stale merge could need.
+const RELEASED_ENTRY_TTL_MS = 120_000
 
 /**
  * Tracks metadata writes so the fetched-worktree merge can tell a stale listing apart.
