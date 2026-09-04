@@ -245,10 +245,17 @@ export function createUpdateWorktreeMeta(
     // is the field this path exists for, and other fields keep their existing semantics.
     const priorColorTag = existingWorktree?.colorTag ?? null
     const recoverAfterFailedPersist = async (): Promise<void> => {
-      const refreshed = await get()
+      const recovery = get()
         .fetchWorktrees(getRepoIdFromWorktreeId(worktreeId), recoveryFetchOptions)
         .catch(() => false)
-      if (refreshed || !('colorTag' in enriched)) {
+      // Why branch first: only a color write needs to know whether the refresh happened, because
+      // only it rolls back locally. Every other field keeps its original background reconciliation
+      // instead of waiting out a second remote-listing timeout before reporting its own failure.
+      if (!('colorTag' in enriched)) {
+        void recovery
+        return
+      }
+      if (await recovery) {
         return
       }
       set((s) => ({

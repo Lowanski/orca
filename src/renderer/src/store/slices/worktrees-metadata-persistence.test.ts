@@ -667,3 +667,35 @@ describe('identity-pinned writes racing reconciliation, and recovery that cannot
     expect(store.getState().worktreesByRepo.repo1[0]?.colorTag).toBe('#ef4444')
   })
 })
+
+describe('failure recovery does not delay non-color metadata writes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetRemoteRuntimeMocks()
+  })
+
+  // Regression: the awaited recovery introduced for color rollback was applied to every failed
+  // write, so a failed rename or comment on a disconnected host waited out a second listing
+  // timeout before the UI could report the original failure.
+  it('reports a failed comment write without waiting for the recovery fetch', async () => {
+    const store = createTestStore()
+    const wt = makeWorktree({ id: 'repo1::/path/slow', repoId: 'repo1', path: '/path/slow' })
+    runtimeEnvironmentCall.mockRejectedValue(new Error('host away'))
+    const fetchWorktrees = vi.fn(() => new Promise<boolean>(() => {}))
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-1' } as never,
+      worktreesByRepo: { repo1: [wt] },
+      fetchWorktrees
+    } as unknown as Partial<AppState>)
+
+    const outcome = await Promise.race([
+      store.getState().updateWorktreeMeta(wt.id, { comment: 'late note' }),
+      new Promise<'timed-out'>((resolve) => setTimeout(() => resolve('timed-out'), 1_000))
+    ])
+
+    expect(outcome).not.toBe('timed-out')
+    expect(outcome).toMatchObject({ ok: false })
+    // Reconciliation was still kicked off, just not waited on.
+    expect(fetchWorktrees).toHaveBeenCalledTimes(1)
+  })
+})
