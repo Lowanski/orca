@@ -1,7 +1,11 @@
 import type { StateCreator } from 'zustand'
 import type { AppState } from '../types'
 import type { FolderWorkspace } from '../../../../shared/folder-workspace-types'
-import { WORKTREE_LINKED_WORK_ITEM_CONTEXT_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
+import {
+  WORKSPACE_COLOR_TAG_RUNTIME_CAPABILITY,
+  WORKTREE_LINKED_WORK_ITEM_CONTEXT_RUNTIME_CAPABILITY
+} from '../../../../shared/protocol-version'
+import { translate } from '@/i18n/i18n'
 import {
   assertRuntimeEnvironmentCapability,
   callRuntimeRpc,
@@ -133,6 +137,18 @@ export function createFolderWorkspaceMutationActions(
           target.environmentId,
           WORKTREE_LINKED_WORK_ITEM_CONTEXT_RUNTIME_CAPABILITY,
           'Update the remote runtime to link Jira'
+        )
+      }
+      // Why: an older paired runtime strips colorTag from folderWorkspace.update and still reports
+      // success, so the strip would paint and the next refresh would silently erase it.
+      if (target.kind === 'environment' && 'colorTag' in updates) {
+        await assertRuntimeEnvironmentCapability(
+          target.environmentId,
+          WORKSPACE_COLOR_TAG_RUNTIME_CAPABILITY,
+          translate(
+            'auto.store.folder.workspaces.folder.workspace.mutations.colorTag',
+            'Update the remote runtime to set workspace colors'
+          )
         )
       }
       const updateTicket = folderWorkspaceUpdates.begin(

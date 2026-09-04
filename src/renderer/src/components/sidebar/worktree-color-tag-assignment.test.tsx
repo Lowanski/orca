@@ -2,6 +2,9 @@
 
 import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+
+const toastError = vi.hoisted(() => vi.fn())
+vi.mock('sonner', () => ({ toast: { error: toastError } }))
 import type { Worktree } from '../../../../shared/worktree/types'
 import { useWorktreeContextMenuCommands } from './use-worktree-context-menu-commands'
 
@@ -143,5 +146,90 @@ describe('workspace color tag write coalescing', () => {
       { colorTag: '#111111' },
       { colorTag: '#222222' }
     ])
+  })
+})
+
+describe('workspace color tag write coalescing: targets and errors', () => {
+  // Why: the menu can reopen on a different multi-selection while a write is still out. The newer
+  // color must reach the newer selection, not the targets captured when the queue started.
+  it('writes each queued value to the selection that was current when it was queued', async () => {
+    const resolvers: (() => void)[] = []
+    const updateWorktreeMeta = vi.fn<
+      (id: string, updates: { colorTag: string | null }) => Promise<{ ok: true }>
+    >(
+      () =>
+        new Promise<{ ok: true }>((resolve) => {
+          resolvers.push(() => resolve({ ok: true }))
+        })
+    )
+    const first = [createWorktree('repo::a')]
+    const second = [createWorktree('repo::b'), createWorktree('repo::c')]
+    const { result, rerender } = renderHook(
+      ({ selection }: { selection: readonly Worktree[] }) =>
+        useWorktreeContextMenuCommands({
+          activeContextWorktrees: selection,
+          batchDeleteWorktrees: [],
+          createGroupDialogActiveRef: { current: false },
+          createProjectGroup: vi.fn(),
+          folderWorkspaceId: null,
+          isMultiContext: selection.length > 1,
+          moveProjectToGroup: vi.fn(),
+          openModal: vi.fn(),
+          repo: null,
+          scopeRef: { current: null },
+          setCreateGroupDialogOpen: vi.fn(),
+          setMenuOpenState: vi.fn(),
+          setWorktreesPinnedAndReveal: vi.fn(),
+          sleepableWorktrees: [],
+          subtreeSleepableWorktrees: [],
+          updateWorktreeMeta,
+          validParentWorktreeId: null,
+          worktree: selection[0],
+          workspaceStatuses: []
+        } as never),
+      { initialProps: { selection: first } }
+    )
+
+    act(() => result.current.handleAssignColorTag('#111111'))
+    rerender({ selection: second })
+    act(() => result.current.handleAssignColorTag('#222222'))
+
+    await act(async () => {
+      resolvers.shift()?.()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(updateWorktreeMeta.mock.calls.map((call) => [call[0], call[1]])).toEqual([
+      ['repo::a', { colorTag: '#111111' }],
+      ['repo::b', { colorTag: '#222222' }],
+      ['repo::c', { colorTag: '#222222' }]
+    ])
+  })
+
+  // Why: an older remote host is refused with { ok: false, error }. Discarding that left the
+  // update-required message unseen; the only signal was the strip vanishing on the next refresh.
+  it('surfaces a refused write as a toast', async () => {
+    toastError.mockClear()
+    const updateWorktreeMeta = vi
+      .fn<(id: string, updates: { colorTag: string | null }) => Promise<unknown>>()
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'Update the remote runtime to set workspace colors'
+      })
+      .mockResolvedValue({ ok: true })
+    const { result } = renderCommands({
+      activeContextWorktrees: [createWorktree('repo::a', 'ssh-box'), createWorktree('repo::b')],
+      updateWorktreeMeta: updateWorktreeMeta as never
+    })
+
+    act(() => result.current.handleAssignColorTag('#111111'))
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(toastError).toHaveBeenCalledTimes(1)
+    expect(toastError).toHaveBeenCalledWith('Update the remote runtime to set workspace colors')
   })
 })

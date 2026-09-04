@@ -55,9 +55,12 @@ export function createUpdateWorktreeMeta(
       try {
         // Why: a rejected folder update reconciles the optimistic write away, so
         // reporting ok would show the dialog a save that silently undid itself.
+        // Why: a folder id can exist on several hosts; without the host the write can land on the
+        // active host instead of the selected one.
         const updated = await get().updateFolderWorkspace(
           workspaceScope.folderWorkspaceId,
-          folderUpdates
+          folderUpdates,
+          executionHostId ? { executionHostId } : undefined
         )
         return updated
           ? { ok: true }

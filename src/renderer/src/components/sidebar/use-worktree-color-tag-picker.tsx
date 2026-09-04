@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { Worktree } from '../../../../shared/worktree/types'
 import { getSharedWorkspaceColorTag } from '../../../../shared/workspace-color-tag'
+import { getWorktreeHostIdentity } from '../../../../shared/worktree/host-qualified-identity'
 import { WorktreeColorTagPickerPopover } from './WorktreeColorTagPickerPopover'
 
 // Why: the menu plays an exit animation, and Radix fires onCloseAutoFocus only once it finishes.
@@ -77,6 +78,10 @@ export function useWorktreeColorTagPicker(
     () => getSharedWorkspaceColorTag(selectedWorktrees.map((item) => item.colorTag)),
     [selectedWorktrees]
   )
+  const previewIdentities = useMemo(
+    () => selectedWorktrees.map((item) => getWorktreeHostIdentity(item)),
+    [selectedWorktrees]
+  )
 
   return {
     sharedColorTag,
@@ -87,6 +92,7 @@ export function useWorktreeColorTagPicker(
         open={open}
         colorTag={sharedColorTag}
         menuPoint={menuPoint}
+        previewIdentities={previewIdentities}
         onOpenChange={setOpen}
         onCommitColorTag={onAssignColorTag}
       />

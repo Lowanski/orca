@@ -38,6 +38,7 @@ export function createUpdateWorktreesMeta(
     const folderWorkspaceUpdates: {
       folderWorkspaceId: string
       updates: ReturnType<typeof getFolderWorkspaceMetaUpdates>
+      executionHostId: WorktreeMetaBatchUpdate['executionHostId']
     }[] = []
     for (const entry of updates) {
       const scope = parseWorkspaceKey(entry.worktreeId)
@@ -46,7 +47,8 @@ export function createUpdateWorktreesMeta(
         if (Object.keys(folderUpdates).length > 0) {
           folderWorkspaceUpdates.push({
             folderWorkspaceId: scope.folderWorkspaceId,
-            updates: folderUpdates
+            updates: folderUpdates,
+            executionHostId: entry.executionHostId
           })
         }
       } else {
@@ -85,8 +87,12 @@ export function createUpdateWorktreesMeta(
     })
 
     await Promise.all([
-      ...folderWorkspaceUpdates.map(({ folderWorkspaceId, updates }) =>
-        get().updateFolderWorkspace(folderWorkspaceId, updates)
+      ...folderWorkspaceUpdates.map(({ folderWorkspaceId, updates, executionHostId }) =>
+        get().updateFolderWorkspace(
+          folderWorkspaceId,
+          updates,
+          executionHostId ? { executionHostId } : undefined
+        )
       ),
       ...gitWorktreeUpdates.map(async ({ worktreeId, updates, executionHostId }) => {
         try {

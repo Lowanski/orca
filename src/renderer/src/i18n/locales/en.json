@@ -536,6 +536,17 @@
             }
           }
         }
+      },
+      "folder": {
+        "workspaces": {
+          "folder": {
+            "workspace": {
+              "mutations": {
+                "colorTag": "Update the remote runtime to set workspace colors"
+              }
+            }
+          }
+        }
       }
     },
     "lib": {

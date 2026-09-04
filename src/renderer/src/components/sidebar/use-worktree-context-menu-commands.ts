@@ -1,4 +1,5 @@
 import { useCallback, useRef } from 'react'
+import { toast } from 'sonner'
 import type { useAppStore } from '@/store'
 import type { Repo } from '../../../../shared/repo-types'
 import type { WorkspaceStatusDefinition, Worktree } from '../../../../shared/worktree/types'
@@ -48,39 +49,53 @@ export function useWorktreeContextMenuCommands(args: {
       { executionHostId: args.worktree.hostId ?? 'local' }
     )
   }, [args])
-  // Why coalesce: the custom picker emits a color per pointer move. Writing each one would issue
-  // a metadata write per pixel per selected workspace, and on a slow host an intermediate could
-  // land after the final value. One write set is in flight at a time; when it settles, only the
-  // newest pending value is written, so the disk always converges on what the user last saw.
-  const colorTagWriteRef = useRef<{ inFlight: boolean; pending: string | null | undefined }>({
-    inFlight: false,
-    pending: undefined
-  })
+  // Why coalesce: quick successive assignments (swatch clicks, a picker commit) must settle in
+  // order on a slow host — one write set in flight, and when it lands only the newest pending
+  // value is written. Each pending value carries its own targets: the menu can reopen on a
+  // different multi-selection while a write is still out, and the newer color must reach the
+  // newer selection, not the one captured when the queue started.
+  const colorTagWriteRef = useRef<{
+    inFlight: boolean
+    pending: { colorTag: string | null; targets: readonly Worktree[] } | null
+  }>({ inFlight: false, pending: null })
   const handleAssignColorTag = useCallback(
     (colorTag: string | null) => {
       const state = colorTagWriteRef.current
-      state.pending = colorTag
+      state.pending = { colorTag, targets: args.activeContextWorktrees }
       if (state.inFlight) {
         return
       }
-      const targets = args.activeContextWorktrees
       const drain = (): void => {
         const next = state.pending
-        state.pending = undefined
-        if (next === undefined) {
+        state.pending = null
+        if (!next) {
           state.inFlight = false
           return
         }
         state.inFlight = true
         void Promise.all(
-          targets.map((worktree) =>
+          next.targets.map((worktree) =>
             args.updateWorktreeMeta(
               worktree.id,
-              { colorTag: next },
+              { colorTag: next.colorTag },
               { executionHostId: worktree.hostId ?? 'local' }
             )
           )
-        ).then(drain, drain)
+        )
+          .then(
+            (results) => {
+              // Why: an older remote host is refused with { ok: false }; without this the only
+              // signal is the strip quietly disappearing on the next refresh.
+              const failed = results.find((result) => !result.ok)
+              if (failed && !failed.ok) {
+                toast.error(failed.error)
+              }
+            },
+            (error: unknown) => {
+              toast.error(error instanceof Error ? error.message : String(error))
+            }
+          )
+          .then(drain)
       }
       drain()
     },

@@ -8,6 +8,10 @@ import {
   normalizeWorkspaceColorTag,
   WORKSPACE_COLOR_TAG_SWATCHES
 } from '../../../../shared/workspace-color-tag'
+import {
+  clearWorkspaceColorTagPreview,
+  setWorkspaceColorTagPreview
+} from './workspace-color-tag-preview'
 
 const SEED_COLOR = WORKSPACE_COLOR_TAG_SWATCHES[0]
 const FULL_HEX_COLOR_PATTERN = /^#?[0-9a-fA-F]{6}$/
@@ -17,6 +21,8 @@ type WorktreeColorTagPickerPopoverProps = {
   colorTag: string | null
   /** Right-click point inside the card's relative scope, so the picker lands where the menu was. */
   menuPoint: { x: number; y: number }
+  /** Host-qualified identities of every card the picker is previewing for. */
+  previewIdentities: readonly string[]
   onOpenChange: (open: boolean) => void
   onCommitColorTag: (colorTag: string | null) => void
 }
@@ -26,14 +32,15 @@ type WorktreeColorTagPickerPopoverProps = {
  * hex field and the picker's own arrow-key handling are actually reachable — a Radix menu manages
  * its own focus and swallows Tab, leaving non-item content keyboard-dead.
  *
- * Every change is forwarded so the card previews live (the store applies metadata optimistically);
- * the caller coalesces persistence. Closing or pressing Enter forwards the final value once more so
- * whatever the user last saw is what settles on disk.
+ * Every change previews on the card through a transient channel — no metadata write per move.
+ * Closing or pressing Enter commits the final value once, so whatever the user last saw is what
+ * settles on disk.
  */
 export function WorktreeColorTagPickerPopover({
   open,
   colorTag,
   menuPoint,
+  previewIdentities,
   onOpenChange,
   onCommitColorTag
 }: WorktreeColorTagPickerPopoverProps): React.JSX.Element {
@@ -42,6 +49,12 @@ export function WorktreeColorTagPickerPopover({
   // anything must not stamp that seed onto an untagged workspace.
   const dirtyRef = useRef(false)
 
+  const clearPreviews = useCallback(() => {
+    for (const identity of previewIdentities) {
+      clearWorkspaceColorTagPreview(identity)
+    }
+  }, [previewIdentities])
+
   useEffect(() => {
     if (open) {
       setDraft(colorTag ?? SEED_COLOR)
@@ -49,24 +62,34 @@ export function WorktreeColorTagPickerPopover({
     }
   }, [colorTag, open])
 
+  // Why: a card that unmounts mid-drag must not leave its preview pinned in the channel.
+  useEffect(() => clearPreviews, [clearPreviews])
+
   const preview = useCallback(
     (value: string) => {
       setDraft(value)
       if (!FULL_HEX_COLOR_PATTERN.test(value.trim())) {
         return
       }
+      const normalized = normalizeWorkspaceColorTag(value)
+      if (!normalized) {
+        return
+      }
       dirtyRef.current = true
-      onCommitColorTag(normalizeWorkspaceColorTag(value))
+      for (const identity of previewIdentities) {
+        setWorkspaceColorTagPreview(identity, normalized)
+      }
     },
-    [onCommitColorTag]
+    [previewIdentities]
   )
 
   const close = useCallback(() => {
     if (dirtyRef.current && FULL_HEX_COLOR_PATTERN.test(draft.trim())) {
       onCommitColorTag(normalizeWorkspaceColorTag(draft))
     }
+    clearPreviews()
     onOpenChange(false)
-  }, [draft, onCommitColorTag, onOpenChange])
+  }, [clearPreviews, draft, onCommitColorTag, onOpenChange])
 
   return (
     <Popover
