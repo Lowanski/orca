@@ -229,15 +229,24 @@ export function acquireDirectSshDetectedWorktreeRefresh(
   // Why here and not in merge: merge runs after the provider completes, so the first owner would
   // stamp completion time and a later joiner would look newer than a write that landed mid-scan.
   const scanStartedAt = rememberLeaseStart(lease.providerRequestId)
+  // Why once, on either path: the scheduler calls release only to cancel, invalidate, or shut down;
+  // a scan that completes normally is only awaited, so its holder must be forgotten on settlement.
+  let clockForgotten = false
+  const forgetClock = (): void => {
+    if (!clockForgotten) {
+      clockForgotten = true
+      forgetLeaseStart(lease.providerRequestId)
+    }
+  }
+  lease.result.then(forgetClock, forgetClock)
   let mergedResult: HostQualifiedDetectedWorktreeResult | undefined
 
   return {
     waiterLeaseId: lease.waiterLeaseId,
     providerRequestId: lease.providerRequestId,
     result: lease.result,
-    // Why wrap: the last holder to release forgets the scan's clock; see rememberLeaseStart.
     release: (...args: Parameters<typeof lease.release>) => {
-      forgetLeaseStart(lease.providerRequestId)
+      forgetClock()
       return lease.release(...args)
     },
     merge: (providerResult) => {
