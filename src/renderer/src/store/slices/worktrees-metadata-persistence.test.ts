@@ -644,6 +644,70 @@ describe('identity-pinned writes racing reconciliation, and recovery that cannot
     expect(store.getState().worktreesByRepo.repo1[0]?.colorTag).toBe('#22c55e')
   })
 
+  // Regression: the rollback used the color captured before the preflight yield and applied it
+  // unconditionally, so it could restore a value the row no longer had, or overwrite a newer color
+  // that did not belong to the failed write.
+  it('rolls back to the color the row had right before the optimistic apply', async () => {
+    const store = createTestStore()
+    const wt = makeWorktree({
+      id: 'repo1::/path/yield',
+      repoId: 'repo1',
+      path: '/path/yield',
+      colorTag: '#22c55e'
+    })
+    runtimeEnvironmentCall.mockRejectedValue(new Error('host away'))
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-1' } as never,
+      worktreesByRepo: { repo1: [wt] },
+      fetchWorktrees: vi.fn().mockResolvedValue(false)
+    } as unknown as Partial<AppState>)
+
+    const pending = store.getState().updateWorktreeMeta(wt.id, { colorTag: '#ef4444' })
+    // A refresh lands a different color during the preflight yield, before the optimistic apply.
+    store.setState({
+      worktreesByRepo: { repo1: [{ ...wt, colorTag: '#3b82f6' }] }
+    } as Partial<AppState>)
+    const result = await pending
+
+    expect(result.ok).toBe(false)
+    expect(store.getState().worktreesByRepo.repo1[0]?.colorTag).toBe('#3b82f6')
+  })
+
+  it('leaves a newer color alone when the failed write is no longer what the row shows', async () => {
+    const store = createTestStore()
+    const wt = makeWorktree({
+      id: 'repo1::/path/newer',
+      repoId: 'repo1',
+      path: '/path/newer',
+      colorTag: null
+    })
+    let rejectWrite: (error: Error) => void = () => undefined
+    runtimeEnvironmentCall.mockImplementation(
+      () =>
+        new Promise((_, reject) => {
+          rejectWrite = reject
+        })
+    )
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-1' } as never,
+      worktreesByRepo: { repo1: [wt] },
+      fetchWorktrees: vi.fn().mockResolvedValue(false)
+    } as unknown as Partial<AppState>)
+
+    const pending = store.getState().updateWorktreeMeta(wt.id, { colorTag: '#ef4444' })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(store.getState().worktreesByRepo.repo1[0]?.colorTag).toBe('#ef4444')
+    // A newer color arrives while the write is still failing.
+    store.setState({
+      worktreesByRepo: { repo1: [{ ...wt, colorTag: '#3b82f6' }] }
+    } as Partial<AppState>)
+    rejectWrite(new Error('host away'))
+    const result = await pending
+
+    expect(result.ok).toBe(false)
+    expect(store.getState().worktreesByRepo.repo1[0]?.colorTag).toBe('#3b82f6')
+  })
+
   it('leaves the store to the refresh when recovery succeeds', async () => {
     const store = createTestStore()
     const wt = makeWorktree({

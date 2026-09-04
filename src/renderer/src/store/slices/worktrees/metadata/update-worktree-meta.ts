@@ -19,6 +19,7 @@ import {
 } from './hosted-review-link-mutation'
 import { normalizeHostedReviewLinkReplacementUpdates } from './hosted-review-link-update-normalization'
 import { persistWorktreeMeta } from './worktree-meta-persist'
+import { createFailedPersistRecovery } from './failed-persist-recovery'
 import { resolvePinnedOwnerRouting } from './pinned-worktree-owner-routing'
 import { refreshHostedReviewAfterMetaUpdate } from './hosted-review-refresh-after-meta-update'
 import { resolveHostedReviewPushTargetUpdate } from './hosted-review-push-target-resolution'
@@ -245,52 +246,36 @@ export function createUpdateWorktreeMeta(
       executionHostId,
       requestedRuntimeOwnerEnvironmentId
     )
-    // Why await and roll back: a write that failed because its host is away usually cannot refresh
-    // either, and fetchWorktrees then just returns false. Left alone, the optimistic color would
-    // stay on the card after the picker has already reported the failure. Scoped to colorTag: it
-    // is the field this path exists for, and other fields keep their existing semantics.
-    const priorColorTag = existingWorktree?.colorTag ?? null
-    const recoverAfterFailedPersist = async (): Promise<void> => {
-      const recovery = get()
-        .fetchWorktrees(getRepoIdFromWorktreeId(worktreeId), recoveryFetchOptions)
-        .catch(() => false)
-      // Why branch first: only a color write needs to know whether the refresh happened, because
-      // only it rolls back locally. Every other field keeps its original background reconciliation
-      // instead of waiting out a second remote-listing timeout before reporting its own failure.
-      if (!('colorTag' in enriched)) {
-        void recovery
-        return
-      }
-      if (await recovery) {
-        return
-      }
-      set((s) => ({
-        worktreesByRepo: applyWorktreeUpdates(
-          s.worktreesByRepo,
-          worktreeId,
-          { colorTag: priorColorTag },
-          executionHostId,
-          requestedIdentityKey,
-          requestedRuntimeOwnerEnvironmentId
-        ),
-        detectedWorktreesByRepo: applyDetectedWorktreeUpdates(
-          s.detectedWorktreesByRepo,
-          worktreeId,
-          { colorTag: priorColorTag },
-          executionHostId,
-          requestedIdentityKey,
-          requestedRuntimeOwnerEnvironmentId
-        )
-      }))
-    }
+    const recoverAfterFailedPersist = createFailedPersistRecovery({
+      get,
+      set,
+      worktreeId,
+      executionHostId,
+      enriched,
+      // Why this row: resolved after the preflight, so a color that changed during that yield is
+      // what a rollback restores, not the value the call started from.
+      priorColorTag: worktreeForUpdate?.colorTag ?? null,
+      pin: options,
+      recoveryFetchOptions
+    })
     try {
       await persistWorktreeMeta(
         pinnedSettings ?? settingsForWorktreeOwner(get(), worktreeId, executionHostId),
         worktreeId,
         enriched,
         executionHostId ?? existingWorktree?.hostId,
-        requestedIdentityKey ?? worktreeForUpdate?.identity?.key,
-        requestedRuntimeOwnerEnvironmentId ?? worktreeForUpdate?.runtimeOwnerEnvironmentId
+        {
+          identityKey: requestedIdentityKey ?? worktreeForUpdate?.identity?.key,
+          runtimeOwnerEnvironmentId:
+            requestedRuntimeOwnerEnvironmentId ?? worktreeForUpdate?.runtimeOwnerEnvironmentId,
+          // Why: a listing the fence held may have carried a peer's newer color, and the
+          // notification it came from is not repeated; one refresh after landing settles it.
+          onHeldColorTagListing: () => {
+            void get()
+              .fetchWorktrees(getRepoIdFromWorktreeId(worktreeId), recoveryFetchOptions)
+              .catch(() => false)
+          }
+        }
       )
       refreshHostedReviewAfterMetaUpdate(get, {
         suppress: options?.suppressHostedReviewRefresh === true,

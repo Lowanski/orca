@@ -112,7 +112,7 @@ export function createUpdateWorktreesMeta(
                     worktreeId,
                     updates,
                     hostId,
-                    worktree?.identity?.key
+                    { identityKey: worktree?.identity?.key }
                   )
                 })
               ))

@@ -110,6 +110,40 @@ describe('assignWorkspaceColorTags', () => {
     settleAll()
   })
 
+  // Regression: a refresh promoted an identity-less row to its canonical identity while its first
+  // write was in flight; the next assignment opened a second queue and two RPCs raced.
+  it('keeps one queue when a row gains its identity mid-flight', async () => {
+    const { write, settleNext, settleAll } = deferredWriter()
+    const detected = {
+      id: 'promo::w',
+      hostId: 'ssh:box',
+      runtimeOwnerEnvironmentId: 'env-p'
+    } as unknown as Worktree
+    const promoted = { ...detected, identity: { key: 'k-promo' } } as unknown as Worktree
+    void assignWorkspaceColorTags([detected], '#111111', write, vi.fn())
+    void assignWorkspaceColorTags([promoted], '#222222', write, vi.fn())
+    expect(write).toHaveBeenCalledTimes(1)
+    settleNext()
+    await flush()
+    expect(write).toHaveBeenCalledTimes(2)
+    expect(write.mock.calls[1]?.[2]).toMatchObject({ identityKey: 'k-promo' })
+    settleAll()
+  })
+
+  it('joins a not-yet-refreshed card to the queue its promoted row already holds', () => {
+    const { write, settleAll } = deferredWriter()
+    const promoted = {
+      id: 'promo::r',
+      hostId: 'ssh:box',
+      identity: { key: 'k-r' }
+    } as unknown as Worktree
+    const stale = { id: 'promo::r', hostId: 'ssh:box' } as unknown as Worktree
+    void assignWorkspaceColorTags([promoted], '#111111', write, vi.fn())
+    void assignWorkspaceColorTags([stale], '#222222', write, vi.fn())
+    expect(write).toHaveBeenCalledTimes(1)
+    settleAll()
+  })
+
   // Regression: an identity-less detected-only nested-SSH row lost its runtime owner on the way to
   // the store, so owner resolution could not tell it from a sibling exposed by another HUB.
   it('carries the runtime owner for rows that have no canonical identity yet', () => {

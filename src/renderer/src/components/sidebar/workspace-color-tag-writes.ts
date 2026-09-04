@@ -23,7 +23,12 @@ type PendingWrite = {
   settle: (() => void)[]
 }
 
-type IdentityQueue = { inFlight: boolean; pending: PendingWrite | undefined }
+type IdentityQueue = {
+  inFlight: boolean
+  pending: PendingWrite | undefined
+  /** The canonical identity this queue serves, once a row carrying one has joined it. */
+  canonical: string | undefined
+}
 
 /**
  * Color-tag write ordering, shared by every context-menu instance.
@@ -66,13 +71,7 @@ function enqueue(
   write: WorkspaceColorTagWriter,
   onError: (message: string) => void
 ): Promise<void> {
-  const identity = getWorkspaceColorTagIdentity(worktree)
-  let queue = queues.get(identity)
-  if (!queue) {
-    queue = { inFlight: false, pending: undefined }
-    queues.set(identity, queue)
-  }
-  const current = queue
+  const current = queueFor(worktree)
   return new Promise<void>((resolve) => {
     // Latest wins: a newer value replaces an older pending one, and the older assignment's waiters
     // settle when the newer write lands — any later state satisfies them.
@@ -83,17 +82,54 @@ function enqueue(
       settle: [...(current.pending?.settle ?? []), resolve]
     }
     if (!current.inFlight) {
-      drain(identity, current, write)
+      drain(current, write)
     }
   })
 }
 
-function drain(identity: string, queue: IdentityQueue, write: WorkspaceColorTagWriter): void {
+/**
+ * Why two keys: a background refresh can promote an identity-less row to its canonical identity
+ * while a write queued under its host-and-owner key is still in flight, and a card that has not
+ * refreshed yet can still address the row without its identity. Registering the queue under both
+ * keys keeps such writes in one line instead of racing two RPCs whose handlers may settle out of
+ * order. A queue that already serves another identity is never adopted: two HUBs' rows for one
+ * checkout share the fallback key and must stay separate.
+ */
+function queueFor(worktree: Worktree): IdentityQueue {
+  const identity = getWorkspaceColorTagIdentity(worktree)
+  const direct = queues.get(identity)
+  if (direct) {
+    return direct
+  }
+  const canonical = worktree.identity?.key
+  const fallback =
+    canonical === undefined
+      ? identity
+      : getWorkspaceColorTagIdentity({ ...worktree, identity: undefined })
+  const byFallback = queues.get(fallback)
+  if (canonical !== undefined && byFallback && byFallback.canonical === undefined) {
+    byFallback.canonical = canonical
+    queues.set(identity, byFallback)
+    return byFallback
+  }
+  const queue: IdentityQueue = { inFlight: false, pending: undefined, canonical }
+  queues.set(identity, queue)
+  if (!queues.has(fallback)) {
+    queues.set(fallback, queue)
+  }
+  return queue
+}
+
+function drain(queue: IdentityQueue, write: WorkspaceColorTagWriter): void {
   const next = queue.pending
   queue.pending = undefined
   if (!next) {
     queue.inFlight = false
-    queues.delete(identity)
+    for (const [key, registered] of queues) {
+      if (registered === queue) {
+        queues.delete(key)
+      }
+    }
     return
   }
   queue.inFlight = true
@@ -125,6 +161,6 @@ function drain(identity: string, queue: IdentityQueue, write: WorkspaceColorTagW
       for (const settle of next.settle) {
         settle()
       }
-      drain(identity, queue, write)
+      drain(queue, write)
     })
 }

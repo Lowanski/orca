@@ -15,8 +15,18 @@ import { translate } from '@/i18n/i18n'
 import type { AppState } from '../../../types'
 import type { WorktreeMeta } from '../../../../../../shared/worktree/meta-types'
 import type { ExecutionHostId } from '../../../../../../shared/execution-host'
+import { normalizeWorkspaceColorTag } from '../../../../../../shared/workspace-color-tag'
 import { encodePushTargetClearForRuntimeRpc } from './hosted-review-link-mutation'
 import { MetaWriteFence } from './worktree-meta-write-fence'
+
+/** What pins a write to one exact row, plus the hook a held listing reports through. */
+export type WorktreeMetaWritePin = {
+  identityKey?: string
+  /** Fence scope only; routing the write to its owner is the caller's job (resolvePinnedOwnerRouting). */
+  runtimeOwnerEnvironmentId?: string
+  /** Runs once after a color write lands if its fence held a listing back; the caller refetches. */
+  onHeldColorTagListing?: () => void
+}
 
 type PendingMetaWrite = {
   worktreeId: string
@@ -69,14 +79,17 @@ export function isColorTagPersistencePending(
   executionHostId?: ExecutionHostId,
   fetchStartedAt?: number,
   identityKey?: string,
-  runtimeOwnerEnvironmentId?: string
+  runtimeOwnerEnvironmentId?: string,
+  /** The value the listing carries; one that already shows the written value is not held. */
+  incomingColorTag?: string | null
 ): boolean {
   return colorTagWriteFence.isPending(
     worktreeId,
     executionHostId,
     fetchStartedAt,
     identityKey,
-    runtimeOwnerEnvironmentId
+    runtimeOwnerEnvironmentId,
+    incomingColorTag
   )
 }
 
@@ -85,16 +98,14 @@ export function persistWorktreeMeta(
   worktreeId: string,
   updates: Partial<WorktreeMeta>,
   executionHostId?: ExecutionHostId,
-  identityKey?: string,
-  /** Fence scope only; routing the write to its owner is the caller's job (resolvePinnedOwnerRouting). */
-  runtimeOwnerEnvironmentId?: string
+  pin?: WorktreeMetaWritePin
 ): Promise<void> {
   const operation = persistWorktreeMetaUntracked(
     settings,
     worktreeId,
     updates,
     executionHostId,
-    identityKey
+    pin?.identityKey
   )
   const onLanded: (() => void)[] = []
   const onFailed: (() => void)[] = []
@@ -111,8 +122,12 @@ export function persistWorktreeMeta(
     const fence = colorTagWriteFence.begin(
       worktreeId,
       executionHostId,
-      identityKey,
-      runtimeOwnerEnvironmentId
+      pin?.identityKey,
+      pin?.runtimeOwnerEnvironmentId,
+      {
+        written: normalizeWorkspaceColorTag(updates.colorTag),
+        onHeldListing: pin?.onHeldColorTagListing
+      }
     )
     onLanded.push(fence.landed)
     onFailed.push(fence.failed)

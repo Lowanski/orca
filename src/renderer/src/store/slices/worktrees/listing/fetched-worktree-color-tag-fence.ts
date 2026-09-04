@@ -1,5 +1,8 @@
 import type { Worktree } from '../../../../../../shared/worktree/types'
-import { getWorkspaceColorTagIdentity } from '../../../../../../shared/workspace-color-tag'
+import {
+  getWorkspaceColorTagIdentity,
+  normalizeWorkspaceColorTag
+} from '../../../../../../shared/workspace-color-tag'
 import { isColorTagPersistencePending } from '../metadata/worktree-meta-persist'
 import type { FencedWorktreeMergeArgs } from './worktree-slice-types'
 
@@ -47,7 +50,8 @@ export function preserveConcurrentColorTag<T extends Worktree>(
         latest.hostId,
         requestStartedAt,
         latest.identity?.key,
-        latest.runtimeOwnerEnvironmentId
+        latest.runtimeOwnerEnvironmentId,
+        normalizeWorkspaceColorTag(worktree.colorTag)
       ) ||
       (started.colorTag ?? null) !== (latest.colorTag ?? null)
     ) {

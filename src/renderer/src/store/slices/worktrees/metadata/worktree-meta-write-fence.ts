@@ -7,12 +7,23 @@ type FenceEntry = {
   identityKey?: string
   /** Runtime owner for rows that have no identity yet: the same two-HUB case before identities exist. */
   runtimeOwnerEnvironmentId?: string
+  /** The value written, when the writer knows it: a listing that already shows it is not stale. */
+  written?: string | null
+  /** Runs once, after the write has landed, if this fence ever held a listing back. */
+  onHeldListing?: () => void
+  held: boolean
+  reconciled: boolean
   /** Null while the write is in flight; the settle time once it has landed. */
   releasedAt: number | null
 }
 
+export type MetaWriteFenceOptions = {
+  written?: string | null
+  onHeldListing?: () => void
+}
+
 // Why this bound: a released entry only matters to a refresh that began before the write landed,
-// and such a refresh can still be mergeable for the whole pipeline — a listing budget of up to 30 s
+// and such a refresh can still be mergeable for the whole pipeline: a listing budget of up to 30 s
 // (local) or 15 s (runtime RPC), then up to 30 s of best-effort terminal teardown before the merge
 // runs. Doubling that worst case keeps the set bounded without expiring an entry a still-pending
 // stale merge could need.
@@ -40,7 +51,8 @@ export class MetaWriteFence {
     worktreeId: string,
     executionHostId?: ExecutionHostId,
     identityKey?: string,
-    runtimeOwnerEnvironmentId?: string
+    runtimeOwnerEnvironmentId?: string,
+    options?: MetaWriteFenceOptions
   ): { landed: () => void; failed: () => void } {
     this.prune()
     const entry: FenceEntry = {
@@ -48,12 +60,19 @@ export class MetaWriteFence {
       executionHostId,
       identityKey,
       runtimeOwnerEnvironmentId,
+      written: options?.written,
+      onHeldListing: options?.onHeldListing,
+      held: false,
+      reconciled: false,
       releasedAt: null
     }
     this.entries.add(entry)
     return {
       landed: () => {
         entry.releasedAt = this.now()
+        if (entry.held) {
+          reconcile(entry)
+        }
       },
       failed: () => {
         this.entries.delete(entry)
@@ -64,23 +83,30 @@ export class MetaWriteFence {
   /**
    * Whether a fetch must keep the current value for this workspace. Without `fetchStartedAt`
    * only an in-flight write counts, which is what a caller with no listing context should assume.
+   * `incoming` is the value the listing carries: one that already shows the written value cannot
+   * be stale with respect to that write and is never held by it.
    */
   isPending(
     worktreeId: string,
     executionHostId?: ExecutionHostId,
     fetchStartedAt?: number,
     identityKey?: string,
-    runtimeOwnerEnvironmentId?: string
+    runtimeOwnerEnvironmentId?: string,
+    incoming?: string | null
   ): boolean {
     this.prune()
     for (const entry of this.entries) {
       if (!matches(entry, worktreeId, executionHostId, identityKey, runtimeOwnerEnvironmentId)) {
         continue
       }
-      if (entry.releasedAt === null) {
-        return true
+      if (incoming !== undefined && entry.written !== undefined && incoming === entry.written) {
+        continue
       }
-      if (fetchStartedAt !== undefined && fetchStartedAt <= entry.releasedAt) {
+      if (
+        entry.releasedAt === null ||
+        (fetchStartedAt !== undefined && fetchStartedAt <= entry.releasedAt)
+      ) {
+        hold(entry)
         return true
       }
     }
@@ -95,6 +121,27 @@ export class MetaWriteFence {
       }
     }
   }
+}
+
+// Why reconcile: a listing that started before the write landed can still carry a *newer*
+// authoritative value (a peer changed the tag after this write reached the host), and the fence
+// cannot tell that from a stale listing. Holding it is the safe default; one refresh after landing
+// lets the host settle the question, so the notification the peer's change produced is not lost.
+function hold(entry: FenceEntry): void {
+  entry.held = true
+  if (entry.releasedAt !== null) {
+    reconcile(entry)
+  }
+}
+
+// Why deferred: the merge that asks the fence runs inside a store reducer; the refresh must start
+// after that reducer has returned.
+function reconcile(entry: FenceEntry): void {
+  if (entry.reconciled || !entry.onHeldListing) {
+    return
+  }
+  entry.reconciled = true
+  queueMicrotask(entry.onHeldListing)
 }
 
 // Why identity wins when both sides have one, and is compared before the id: two HUBs can publish

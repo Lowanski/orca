@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { MetaWriteFence } from './worktree-meta-write-fence'
 
 function fenceAt(start: number) {
@@ -95,6 +95,57 @@ describe('MetaWriteFence', () => {
     expect(fence.isPending('repo::/after', 'local', undefined, 'k-same')).toBe(true)
     expect(fence.isPending('repo::/after', 'local', undefined, 'k-other')).toBe(false)
     expect(fence.isPending('repo::/after', 'local')).toBe(false)
+  })
+
+  // Regression: a listing that started before the write landed but already carried the written
+  // value was held as stale, so the host's own confirmation of the write was thrown away.
+  it('does not hold a listing that already shows the written value', () => {
+    const { fence } = fenceAt(1000)
+    fence.begin('w', 'local', undefined, undefined, { written: '#ef4444' })
+    expect(fence.isPending('w', 'local', undefined, undefined, undefined, '#ef4444')).toBe(false)
+    expect(fence.isPending('w', 'local', undefined, undefined, undefined, null)).toBe(true)
+  })
+
+  // Regression: a peer could change the tag after this write reached the host and before its
+  // response settled; the fetch that change produced started before release, was held, and nothing
+  // ever asked the host again.
+  it('asks for one reconcile after landing when it held a listing while in flight', async () => {
+    const onHeldListing = vi.fn()
+    const { fence } = fenceAt(1000)
+    const { landed } = fence.begin('w', 'local', undefined, undefined, { onHeldListing })
+    fence.isPending('w', 'local', 900)
+    fence.isPending('w', 'local', 950)
+    await Promise.resolve()
+    expect(onHeldListing).not.toHaveBeenCalled()
+    landed()
+    await Promise.resolve()
+    expect(onHeldListing).toHaveBeenCalledTimes(1)
+  })
+
+  it('reconciles once, deferred, when a released fence holds a late listing', async () => {
+    const onHeldListing = vi.fn()
+    const { fence, advanceTo } = fenceAt(1000)
+    const { landed } = fence.begin('w', 'local', undefined, undefined, { onHeldListing })
+    advanceTo(2000)
+    landed()
+    await Promise.resolve()
+    expect(onHeldListing).not.toHaveBeenCalled()
+    expect(fence.isPending('w', 'local', 1500)).toBe(true)
+    expect(onHeldListing).not.toHaveBeenCalled()
+    expect(fence.isPending('w', 'local', 1600)).toBe(true)
+    await Promise.resolve()
+    expect(onHeldListing).toHaveBeenCalledTimes(1)
+  })
+
+  it('never reconciles for a write that held nothing, or one that failed', async () => {
+    const onHeldListing = vi.fn()
+    const { fence } = fenceAt(1000)
+    fence.begin('w', 'local', undefined, undefined, { onHeldListing }).landed()
+    const failing = fence.begin('x', 'local', undefined, undefined, { onHeldListing })
+    fence.isPending('x', 'local')
+    failing.failed()
+    await Promise.resolve()
+    expect(onHeldListing).not.toHaveBeenCalled()
   })
 
   it('matches a host-agnostic query against a host-scoped entry and vice versa', () => {

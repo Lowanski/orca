@@ -352,7 +352,9 @@ describe('fetchWorktrees', () => {
     const listing = new Promise<Worktree[]>((resolve) => {
       resolveListing = resolve
     })
-    worktreeListMock.mockReturnValue(listing)
+    worktreeListMock.mockReturnValueOnce(listing)
+    // The one refresh a held listing earns asks the host again and gets the landed color back.
+    worktreeListMock.mockResolvedValue([{ ...daily, head: 'def456', colorTag: '#ef4444' }])
     store.setState({
       worktreesByRepo: { repo1: [daily] },
       detectedWorktreesByRepo: { repo1: detected }
@@ -366,9 +368,14 @@ describe('fetchWorktrees', () => {
     resolveListing([{ ...daily, head: 'def456' }])
     await Promise.all([first, second])
 
-    expect(worktreeListMock).toHaveBeenCalledTimes(1)
     expect(store.getState().worktreesByRepo.repo1[0]?.colorTag).toBe('#ef4444')
     expect(store.getState().worktreesByRepo.repo1[0]?.head).toBe('def456')
+    // Why two: the fence held the stale listing, and a held listing that started before the write
+    // landed can also carry a peer's newer color, so it earns exactly one refresh afterwards.
+    await vi.waitFor(() => expect(worktreeListMock).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() =>
+      expect(store.getState().worktreesByRepo.repo1[0]?.colorTag).toBe('#ef4444')
+    )
     worktreeListMock.mockReset()
   })
 
