@@ -7,8 +7,20 @@ import { useSyncExternalStore } from 'react'
  * would issue a metadata write per pointer move. This holds the color the user is *looking at*
  * while dragging; the popover commits once on close. Keyed by host-qualified identity so the same
  * worktree id on two hosts previews independently. Nothing here is persisted or synced.
+ *
+ * Why owners: a picker that has closed keeps holding its preview until its write lands. If another
+ * picker previews the same card in the meantime, the first one's clear must not erase the newer
+ * live preview, so every entry remembers who set it and a clear only removes its own.
  */
-const previews = new Map<string, string>()
+export type WorkspaceColorTagPreviewOwner = symbol
+
+export function createWorkspaceColorTagPreviewOwner(): WorkspaceColorTagPreviewOwner {
+  return Symbol('workspace-color-tag-preview')
+}
+
+type PreviewEntry = { colorTag: string; owner: WorkspaceColorTagPreviewOwner }
+
+const previews = new Map<string, PreviewEntry>()
 const listeners = new Set<() => void>()
 
 function emit(): void {
@@ -22,12 +34,14 @@ function emit(): void {
 // instead of selected × rendered.
 export function setWorkspaceColorTagPreviews(
   identities: readonly string[],
-  colorTag: string
+  colorTag: string,
+  owner: WorkspaceColorTagPreviewOwner
 ): void {
   let changed = false
   for (const identity of identities) {
-    if (previews.get(identity) !== colorTag) {
-      previews.set(identity, colorTag)
+    const entry = previews.get(identity)
+    if (entry?.colorTag !== colorTag || entry.owner !== owner) {
+      previews.set(identity, { colorTag, owner })
       changed = true
     }
   }
@@ -36,10 +50,14 @@ export function setWorkspaceColorTagPreviews(
   }
 }
 
-export function clearWorkspaceColorTagPreviews(identities: readonly string[]): void {
+/** Removes only the entries this owner set; a newer preview from another picker stays. */
+export function clearWorkspaceColorTagPreviews(
+  identities: readonly string[],
+  owner: WorkspaceColorTagPreviewOwner
+): void {
   let changed = false
   for (const identity of identities) {
-    if (previews.delete(identity)) {
+    if (previews.get(identity)?.owner === owner && previews.delete(identity)) {
       changed = true
     }
   }
@@ -59,7 +77,7 @@ function subscribe(listener: () => void): () => void {
 export function useWorkspaceColorTagPreview(identity: string): string | undefined {
   return useSyncExternalStore(
     subscribe,
-    () => previews.get(identity),
+    () => previews.get(identity)?.colorTag,
     () => undefined
   )
 }

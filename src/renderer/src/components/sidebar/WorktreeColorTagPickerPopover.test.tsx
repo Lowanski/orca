@@ -18,21 +18,18 @@ vi.mock('react-colorful', () => ({
 
 // Why capture the content props: Escape is delivered by Radix through onEscapeKeyDown, which a DOM
 // keydown cannot reach here, so the test invokes it the way Radix would.
-const contentProps = vi.hoisted(() => ({
-  current: null as null | {
-    onEscapeKeyDown?: (event: KeyboardEvent) => void
-    onKeyDown?: React.KeyboardEventHandler<HTMLDivElement>
-  }
-}))
+type ContentProps = {
+  onEscapeKeyDown?: (event: KeyboardEvent) => void
+  onPointerDownOutside?: () => void
+  onCloseAutoFocus?: (event: Event) => void
+  onKeyDown?: React.KeyboardEventHandler<HTMLDivElement>
+}
+const contentProps = vi.hoisted(() => ({ current: null as null | ContentProps }))
 vi.mock('@/components/ui/popover', () => ({
   Popover: (props: { open: boolean; children: React.ReactNode }) =>
     props.open ? <div data-testid="popover">{props.children}</div> : null,
   PopoverAnchor: (props: { children?: React.ReactNode }) => <>{props.children}</>,
-  PopoverContent: (props: {
-    children?: React.ReactNode
-    onEscapeKeyDown?: (event: KeyboardEvent) => void
-    onKeyDown?: React.KeyboardEventHandler<HTMLDivElement>
-  }) => {
+  PopoverContent: (props: ContentProps & { children?: React.ReactNode }) => {
     contentProps.current = props
     return (
       <div data-testid="content" onKeyDown={props.onKeyDown}>
@@ -62,6 +59,7 @@ function mount(props: { colorTag: string | null; open?: boolean; onCommitColorTa
     props.onCommitColorTag ??
     vi.fn<(colorTag: string | null) => Promise<void>>().mockResolvedValue(undefined)
   const onOpenChange = vi.fn()
+  const onRestoreFocus = vi.fn()
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root: Root = createRoot(container)
@@ -76,14 +74,14 @@ function mount(props: { colorTag: string | null; open?: boolean; onCommitColorTa
           previewIdentities={[IDENTITY]}
           onOpenChange={onOpenChange}
           onCommitColorTag={onCommitColorTag}
-          onRestoreFocus={vi.fn()}
+          onRestoreFocus={onRestoreFocus}
         />
       </>
     )
   })
   const input = container.querySelector('input') as HTMLInputElement
   const wheel = container.querySelector('[data-testid="wheel"]') as HTMLElement
-  return { root, container, input, wheel, onCommitColorTag, onOpenChange }
+  return { root, container, input, wheel, onCommitColorTag, onOpenChange, onRestoreFocus }
 }
 
 function typeInto(input: HTMLInputElement, value: string): void {
@@ -313,6 +311,74 @@ describe('WorktreeColorTagPickerPopover', () => {
     bystander.remove()
 
     expect(latestPreview).toBe('#112233')
+  })
+
+  it('returns focus to the sidebar after a keyboard close', () => {
+    mounted = mount({ colorTag: null })
+    act(() => pressEnter(mounted!.input))
+    const event = new Event('closeAutoFocus', { cancelable: true })
+    act(() => contentProps.current?.onCloseAutoFocus?.(event))
+
+    expect(mounted.onRestoreFocus).toHaveBeenCalledWith(event)
+  })
+
+  // Regression: every close ran the sidebar focus restore, so a click onto another control — a
+  // freshly opened menu, say — had its focus stolen after the exit animation and was dismissed.
+  it('leaves focus on the outside target after a pointer dismiss', () => {
+    mounted = mount({ colorTag: null })
+    act(() => contentProps.current?.onPointerDownOutside?.())
+    const event = new Event('closeAutoFocus', { cancelable: true })
+    act(() => contentProps.current?.onCloseAutoFocus?.(event))
+
+    expect(mounted.onRestoreFocus).not.toHaveBeenCalled()
+    expect(event.defaultPrevented).toBe(true)
+  })
+
+  // Regression: picker A, closed but holding its preview for a slow write, cleared the card's
+  // preview identity-wide when the write landed, erasing picker B's newer live preview.
+  it('does not clear a newer preview another picker set when its own slow commit lands', async () => {
+    let land!: () => void
+    const commit: CommitMock = vi.fn<(colorTag: string | null) => Promise<void>>(
+      () =>
+        new Promise<void>((resolve) => {
+          land = resolve
+        })
+    )
+    mounted = mount({ colorTag: null, onCommitColorTag: commit })
+    act(() => pickerOnChange.current?.('#111111'))
+    act(() => pressEnter(mounted!.input))
+    expect(latestPreview).toBe('#111111')
+
+    const other = document.createElement('div')
+    document.body.appendChild(other)
+    const otherRoot = createRoot(other)
+    act(() => {
+      otherRoot.render(
+        <WorktreeColorTagPickerPopover
+          open
+          colorTag={null}
+          menuPoint={POINT}
+          previewIdentities={[IDENTITY]}
+          onOpenChange={vi.fn()}
+          onCommitColorTag={vi
+            .fn<(colorTag: string | null) => Promise<void>>()
+            .mockResolvedValue(undefined)}
+          onRestoreFocus={vi.fn()}
+        />
+      )
+    })
+    act(() => pickerOnChange.current?.('#222222'))
+    expect(latestPreview).toBe('#222222')
+
+    await act(async () => {
+      land()
+      await settle()
+    })
+    expect(latestPreview).toBe('#222222')
+
+    act(() => otherRoot.unmount())
+    other.remove()
+    expect(latestPreview).toBeUndefined()
   })
 
   it('seeds the wheel from the current tag', () => {

@@ -10,10 +10,14 @@ import {
 } from '../../../../shared/workspace-color-tag'
 import {
   clearWorkspaceColorTagPreviews,
-  setWorkspaceColorTagPreviews
+  createWorkspaceColorTagPreviewOwner,
+  setWorkspaceColorTagPreviews,
+  type WorkspaceColorTagPreviewOwner
 } from './workspace-color-tag-preview'
 
 const SEED_COLOR = WORKSPACE_COLOR_TAG_SWATCHES[0]
+
+type CloseReason = 'keyboard' | 'pointer'
 
 type WorktreeColorTagPickerPopoverProps = {
   open: boolean
@@ -25,7 +29,7 @@ type WorktreeColorTagPickerPopoverProps = {
   onOpenChange: (open: boolean) => void
   /** Resolves once the write has landed in the store; the preview is held until then. */
   onCommitColorTag: (colorTag: string | null) => Promise<void>
-  /** Runs as the popover closes; hands focus back to the sidebar the way the menu does. */
+  /** Runs on keyboard or programmatic close; hands focus back to the sidebar the way the menu does. */
   onRestoreFocus: (event: Event) => void
 }
 
@@ -34,6 +38,8 @@ type WorktreeColorTagPickerFieldsProps = {
   previewIdentities: readonly string[]
   /** The last complete color the card was shown; the popover commits this on close. */
   lastValidRef: React.MutableRefObject<string | null>
+  /** Who set this open session's previews, so a later clear removes only these. */
+  previewOwnerRef: React.MutableRefObject<WorkspaceColorTagPreviewOwner | null>
   onCommit: () => void
 }
 
@@ -45,6 +51,7 @@ function WorktreeColorTagPickerFields({
   initialColor,
   previewIdentities,
   lastValidRef,
+  previewOwnerRef,
   onCommit
 }: WorktreeColorTagPickerFieldsProps): React.JSX.Element {
   // draft is whatever the field holds, complete or not; lastValid is the color the card is showing.
@@ -53,10 +60,12 @@ function WorktreeColorTagPickerFields({
   // never stamped onto an untagged workspace.
   const [draft, setDraft] = useState(initialColor)
   const [lastValid, setLastValid] = useState<string | null>(null)
+  const [owner] = useState(() => createWorkspaceColorTagPreviewOwner())
 
   useEffect(() => {
+    previewOwnerRef.current = owner
     lastValidRef.current = null
-  }, [lastValidRef])
+  }, [lastValidRef, owner, previewOwnerRef])
 
   const preview = useCallback(
     (value: string) => {
@@ -69,9 +78,9 @@ function WorktreeColorTagPickerFields({
       }
       setLastValid(normalized)
       lastValidRef.current = normalized
-      setWorkspaceColorTagPreviews(previewIdentities, normalized)
+      setWorkspaceColorTagPreviews(previewIdentities, normalized, owner)
     },
-    [lastValidRef, previewIdentities]
+    [lastValidRef, owner, previewIdentities]
   )
 
   // The wheel only ever renders a complete color: the draft if it parses, else the last one that did.
@@ -119,50 +128,69 @@ export function WorktreeColorTagPickerPopover({
   onRestoreFocus
 }: WorktreeColorTagPickerPopoverProps): React.JSX.Element {
   const lastValidRef = useRef<string | null>(null)
+  const previewOwnerRef = useRef<WorkspaceColorTagPreviewOwner | null>(null)
   // Why: a folder or queued write reaches the store only when it lands. Dropping the preview the
   // instant the popover closes made the card snap back to its old strip for the whole round trip.
-  const committingRef = useRef(false)
+  const committingOwnerRef = useRef<WorkspaceColorTagPreviewOwner | null>(null)
+  const closeReasonRef = useRef<CloseReason | null>(null)
 
   const clearPreviews = useCallback(
-    () => clearWorkspaceColorTagPreviews(previewIdentities),
+    (owner: WorkspaceColorTagPreviewOwner | null) => {
+      if (owner) {
+        clearWorkspaceColorTagPreviews(previewIdentities, owner)
+      }
+    },
     [previewIdentities]
   )
 
+  // Why a named release: the cleanup must read which session is closing *at close time*, and a
+  // session that is committing keeps its preview until the write lands.
+  const releaseSessionPreview = useCallback(() => {
+    const owner = previewOwnerRef.current
+    if (owner !== committingOwnerRef.current) {
+      clearPreviews(owner)
+    }
+  }, [clearPreviews])
+
   // Why gate on open: every card mounts one of these. A closed bystander that unmounts — the list
-  // is virtualized — must not clear the previews an open picker on another card is driving. A
-  // close that is committing keeps its preview until the write lands.
+  // is virtualized — must not clear the previews an open picker on another card is driving.
   useEffect(() => {
     if (!open) {
       return undefined
     }
-    return () => {
-      if (!committingRef.current) {
-        clearPreviews()
-      }
-    }
-  }, [clearPreviews, open])
+    return releaseSessionPreview
+  }, [open, releaseSessionPreview])
 
   const commitAndClose = useCallback(() => {
+    const owner = previewOwnerRef.current
     const colorTag = lastValidRef.current
     if (colorTag) {
-      committingRef.current = true
+      committingOwnerRef.current = owner
       // Why swallow: the coordinator reports failures itself; here a rejection only means the
       // preview should stop being held, and letting it escape would surface as an unhandled error.
       void onCommitColorTag(colorTag)
         .catch(() => undefined)
         .finally(() => {
-          committingRef.current = false
-          clearPreviews()
+          if (committingOwnerRef.current === owner) {
+            committingOwnerRef.current = null
+          }
+          clearPreviews(owner)
         })
     } else {
-      clearPreviews()
+      clearPreviews(owner)
     }
     onOpenChange(false)
   }, [clearPreviews, onCommitColorTag, onOpenChange])
 
+  const commitFromKeyboard = useCallback(() => {
+    closeReasonRef.current = 'keyboard'
+    commitAndClose()
+  }, [commitAndClose])
+
   // Why: Escape backs out. The draft is dropped and nothing is written.
   const cancel = useCallback(() => {
-    clearPreviews()
+    closeReasonRef.current = 'keyboard'
+    clearPreviews(previewOwnerRef.current)
     onOpenChange(false)
   }, [clearPreviews, onOpenChange])
 
@@ -191,13 +219,28 @@ export function WorktreeColorTagPickerPopover({
           event.preventDefault()
           cancel()
         }}
-        onCloseAutoFocus={onRestoreFocus}
+        onPointerDownOutside={() => {
+          closeReasonRef.current = 'pointer'
+        }}
+        // Why by reason: after a click outside, focus already sits on what the user clicked — a
+        // newly opened menu, another control — and pulling it back to the sidebar would dismiss
+        // that. Only a keyboard or programmatic close has nowhere better to send focus.
+        onCloseAutoFocus={(event) => {
+          const reason = closeReasonRef.current
+          closeReasonRef.current = null
+          if (reason === 'pointer') {
+            event.preventDefault()
+            return
+          }
+          onRestoreFocus(event)
+        }}
       >
         <WorktreeColorTagPickerFields
           initialColor={colorTag ?? SEED_COLOR}
           previewIdentities={previewIdentities}
           lastValidRef={lastValidRef}
-          onCommit={commitAndClose}
+          previewOwnerRef={previewOwnerRef}
+          onCommit={commitFromKeyboard}
         />
       </PopoverContent>
     </Popover>
