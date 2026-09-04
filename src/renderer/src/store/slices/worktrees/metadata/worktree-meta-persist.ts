@@ -133,6 +133,9 @@ async function persistWorktreeMetaUntracked(
     await window.api.worktrees.updateMeta({
       worktreeId,
       ...(executionHostId ? { executionHostId } : {}),
+      // Why: local and direct-SSH writes had no identity selector, so a checkout replaced at the same
+      // path between the renderer's lookup and the main-process write inherited the pinned color.
+      ...(identityKey ? { identityKey } : {}),
       updates
     })
     return

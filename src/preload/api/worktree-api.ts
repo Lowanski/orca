@@ -115,6 +115,8 @@ export type WorktreeApi = {
   updateMeta: (args: {
     worktreeId: string
     executionHostId?: ExecutionHostId
+    /** Canonical identity to pin; main refuses the write if the occupant differs. */
+    identityKey?: string
     updates: Partial<WorktreeMeta>
   }) => Promise<Worktree>
   listLineage: () => Promise<{

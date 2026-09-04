@@ -8,7 +8,11 @@ type WorktreeMetaWriteResult = { ok: true } | { ok: false; error: string }
 export type WorkspaceColorTagWriter = (
   worktreeId: string,
   updates: { colorTag: string | null },
-  options?: { executionHostId?: ExecutionHostId; identityKey?: string }
+  options?: {
+    executionHostId?: ExecutionHostId
+    identityKey?: string
+    runtimeOwnerEnvironmentId?: string
+  }
 ) => Promise<WorktreeMetaWriteResult>
 
 type PendingWrite = {
@@ -97,7 +101,13 @@ function drain(identity: string, queue: IdentityQueue, write: WorkspaceColorTagW
   write(
     next.worktree.id,
     { colorTag: next.colorTag },
-    { executionHostId: next.worktree.hostId ?? 'local', identityKey: next.worktree.identity?.key }
+    {
+      executionHostId: next.worktree.hostId ?? 'local',
+      identityKey: next.worktree.identity?.key,
+      // Why: a detected-only nested-SSH row has no identity yet, and its runtime owner is the only
+      // thing that tells it apart from a sibling exposed by another HUB or by the desktop directly.
+      runtimeOwnerEnvironmentId: next.worktree.runtimeOwnerEnvironmentId
+    }
   )
     .then(
       (result) => {

@@ -14,6 +14,7 @@ import { planWorktreeSortOrderUpdates } from '../../../../shared/worktree/sort-o
 import { readBranchRenameFailureOutputForDisplay } from '../../../agent-hooks/branch-rename-failure-output'
 import { normalizeLinkedWorkItemFields } from '../ipc-context-schemas'
 import { listDesktopLineageForHost } from './host-lineage-listing'
+import { assertWorktreeMetaIdentity } from './worktree-meta-identity-guard'
 import type { WorktreeIpcContext } from '../worktree-ipc-context'
 
 export function registerWorktreeMetadataHandlers(context: WorktreeIpcContext): void {
@@ -25,6 +26,8 @@ export function registerWorktreeMetadataHandlers(context: WorktreeIpcContext): v
       args: {
         worktreeId: string
         executionHostId?: string
+        /** Canonical identity the caller pinned; the write is refused if the occupant differs. */
+        identityKey?: string
         updates: Partial<WorktreeMeta>
       }
     ) => {
@@ -47,6 +50,15 @@ export function registerWorktreeMetadataHandlers(context: WorktreeIpcContext): v
             }
           : validatedUpdates
       const sanitizedUpdates = stripOrcaProvenanceMetaUpdates(updates)
+      // Why before the write: the renderer's lookup and this handler run at different times, and
+      // a replacement occupant at the same path must not receive a write pinned to its predecessor.
+      assertWorktreeMetaIdentity(
+        executionHostId
+          ? store.getWorktreeMetaForHost(args.worktreeId, executionHostId)
+          : store.getWorktreeMeta(args.worktreeId),
+        args.worktreeId,
+        args.identityKey
+      )
       const meta = executionHostId
         ? store.setWorktreeMetaForHost(args.worktreeId, executionHostId, sanitizedUpdates)
         : store.setWorktreeMeta(args.worktreeId, sanitizedUpdates)

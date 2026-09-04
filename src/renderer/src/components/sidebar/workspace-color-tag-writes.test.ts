@@ -110,6 +110,23 @@ describe('assignWorkspaceColorTags', () => {
     settleAll()
   })
 
+  // Regression: an identity-less detected-only nested-SSH row lost its runtime owner on the way to
+  // the store, so owner resolution could not tell it from a sibling exposed by another HUB.
+  it('carries the runtime owner for rows that have no canonical identity yet', () => {
+    const { write, settleAll } = deferredWriter()
+    const viaHub = {
+      id: 'nested::d',
+      hostId: 'ssh:box',
+      runtimeOwnerEnvironmentId: 'env-hub'
+    } as unknown as Worktree
+    void assignWorkspaceColorTags([viaHub], '#111111', write, vi.fn())
+    expect(write.mock.calls[0]?.[2]).toMatchObject({
+      executionHostId: 'ssh:box',
+      runtimeOwnerEnvironmentId: 'env-hub'
+    })
+    settleAll()
+  })
+
   // Regression: the picker dropped its preview the instant it closed, and a folder or queued write
   // only reaches the store when it lands, so the card snapped back for the whole round trip.
   it('resolves only after the write has landed', async () => {

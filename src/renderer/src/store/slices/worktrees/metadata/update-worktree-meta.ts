@@ -36,6 +36,7 @@ export function createUpdateWorktreeMeta(
     // Why: two paired runtimes can publish one checkout as two rows with the same id and host; a
     // caller that knows the exact row pins it so lookup, optimistic apply, and persistence agree.
     const requestedIdentityKey = options?.identityKey
+    const requestedRuntimeOwnerEnvironmentId = options?.runtimeOwnerEnvironmentId
     const identityMatch = findKnownWorktreeByIdentityKey(
       get(),
       requestedWorktreeId,
@@ -142,14 +143,16 @@ export function createUpdateWorktreeMeta(
         worktreeId,
         enriched,
         executionHostId,
-        requestedIdentityKey
+        requestedIdentityKey,
+        requestedRuntimeOwnerEnvironmentId
       )
       const nextDetectedWorktrees = applyDetectedWorktreeUpdates(
         s.detectedWorktreesByRepo,
         worktreeId,
         enriched,
         executionHostId,
-        requestedIdentityKey
+        requestedIdentityKey,
+        requestedRuntimeOwnerEnvironmentId
       )
       const cacheKey =
         reviewRepo && reviewBranch
@@ -236,7 +239,8 @@ export function createUpdateWorktreeMeta(
       get().settings,
       requestedIdentityKey,
       worktreeForUpdate,
-      executionHostId
+      executionHostId,
+      requestedRuntimeOwnerEnvironmentId
     )
     // Why await and roll back: a write that failed because its host is away usually cannot refresh
     // either, and fetchWorktrees then just returns false. Left alone, the optimistic color would
@@ -263,14 +267,16 @@ export function createUpdateWorktreeMeta(
           worktreeId,
           { colorTag: priorColorTag },
           executionHostId,
-          requestedIdentityKey
+          requestedIdentityKey,
+          requestedRuntimeOwnerEnvironmentId
         ),
         detectedWorktreesByRepo: applyDetectedWorktreeUpdates(
           s.detectedWorktreesByRepo,
           worktreeId,
           { colorTag: priorColorTag },
           executionHostId,
-          requestedIdentityKey
+          requestedIdentityKey,
+          requestedRuntimeOwnerEnvironmentId
         )
       }))
     }
