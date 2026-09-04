@@ -46,7 +46,7 @@ export function applyWorktreeUpdates(
   rawUpdates: Partial<WorktreeMeta>,
   executionHostId?: ExecutionHostId,
   identityKey?: string,
-  runtimeOwnerEnvironmentId?: string
+  runtimeOwnerEnvironmentId?: string | null
 ): Record<string, Worktree[]> {
   const updates = withoutErasedRequiredWorktreeFields(rawUpdates)
   const repoId = getRepoIdFromWorktreeId(worktreeId)
@@ -64,7 +64,7 @@ export function applyWorktreeUpdates(
       // an identity-pinned update must land on exactly the row that asked for it.
       (identityKey !== undefined && worktree.identity?.key !== identityKey) ||
       (runtimeOwnerEnvironmentId !== undefined &&
-        worktree.runtimeOwnerEnvironmentId !== runtimeOwnerEnvironmentId)
+        (worktree.runtimeOwnerEnvironmentId ?? null) !== runtimeOwnerEnvironmentId)
     ) {
       return worktree
     }

@@ -23,7 +23,7 @@ import { MetaWriteFence } from './worktree-meta-write-fence'
 export type WorktreeMetaWritePin = {
   identityKey?: string
   /** Fence scope only; routing the write to its owner is the caller's job (resolvePinnedOwnerRouting). */
-  runtimeOwnerEnvironmentId?: string
+  runtimeOwnerEnvironmentId?: string | null
   /** Runs once after a color write lands if its fence held a listing back; the caller refetches. */
   onHeldColorTagListing?: () => void
 }
@@ -79,7 +79,7 @@ export function isColorTagPersistencePending(
   executionHostId?: ExecutionHostId,
   fetchStartedAt?: number,
   identityKey?: string,
-  runtimeOwnerEnvironmentId?: string,
+  runtimeOwnerEnvironmentId?: string | null,
   /** The value the listing carries; one that already shows the written value is not held. */
   incomingColorTag?: string | null
 ): boolean {

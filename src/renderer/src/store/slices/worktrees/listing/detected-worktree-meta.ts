@@ -29,7 +29,7 @@ export function applyDetectedWorktreeUpdates(
   rawUpdates: Partial<WorktreeMeta>,
   executionHostId?: ExecutionHostId,
   identityKey?: string,
-  runtimeOwnerEnvironmentId?: string
+  runtimeOwnerEnvironmentId?: string | null
 ): AppState['detectedWorktreesByRepo'] {
   // Why: mirrors applyWorktreeUpdates — detected rows feed the same palette.
   const updates = withoutErasedRequiredWorktreeFields(rawUpdates)
@@ -44,7 +44,7 @@ export function applyDetectedWorktreeUpdates(
         !worktreeRowMatchesMetaHost(worktree, executionHostId) ||
         (identityKey !== undefined && worktree.identity?.key !== identityKey) ||
         (runtimeOwnerEnvironmentId !== undefined &&
-          worktree.runtimeOwnerEnvironmentId !== runtimeOwnerEnvironmentId)
+          (worktree.runtimeOwnerEnvironmentId ?? null) !== runtimeOwnerEnvironmentId)
       ) {
         return worktree
       }
@@ -105,7 +105,7 @@ export function findKnownWorktreeByIdentityKey(
 }
 
 /** What a caller uses to address one exact row: its identity, or its runtime owner before it has one. */
-export type WorktreeMetaRowPin = { identityKey?: string; runtimeOwnerEnvironmentId?: string }
+export type WorktreeMetaRowPin = { identityKey?: string; runtimeOwnerEnvironmentId?: string | null }
 
 export function isPinnedWorktreeMetaUpdate(pin: WorktreeMetaRowPin | undefined): boolean {
   return pin?.identityKey !== undefined || pin?.runtimeOwnerEnvironmentId !== undefined
@@ -131,7 +131,8 @@ export function findPinnedWorktreeRow(
   }
   const ownsRow = (worktree: Worktree): boolean =>
     worktree.id === worktreeId &&
-    worktree.runtimeOwnerEnvironmentId === owner &&
+    // Why `?? null`: a `null` pin names the row the desktop lists itself, which carries no owner.
+    (worktree.runtimeOwnerEnvironmentId ?? null) === owner &&
     worktreeRowMatchesMetaHost(worktree, executionHostId)
   // Why: a folder workspace published by a paired runtime projects that runtime as its owner and
   // lives in its own list; searching only the git catalogs rejected every such folder as gone.

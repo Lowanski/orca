@@ -50,7 +50,8 @@ export function preserveConcurrentColorTag<T extends Worktree>(
         latest.hostId,
         requestStartedAt,
         latest.identity?.key,
-        latest.runtimeOwnerEnvironmentId,
+        // Why `?? null`: the merged row is known, so "no owner" means the desktop lists it, not unknown.
+        latest.runtimeOwnerEnvironmentId ?? null,
         normalizeWorkspaceColorTag(worktree.colorTag)
       ) ||
       (started.colorTag ?? null) !== (latest.colorTag ?? null)

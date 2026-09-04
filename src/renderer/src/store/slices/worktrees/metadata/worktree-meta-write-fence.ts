@@ -5,8 +5,9 @@ type FenceEntry = {
   executionHostId?: ExecutionHostId
   /** Canonical row identity when the writer knew it; lets two HUBs' rows for one checkout differ. */
   identityKey?: string
-  /** Runtime owner for rows that have no identity yet: the same two-HUB case before identities exist. */
-  runtimeOwnerEnvironmentId?: string
+  /** Runtime owner for rows that have no identity yet: the same two-HUB case before identities exist.
+   *  `null` means the desktop lists the row itself, as distinct from a HUB's row as two HUBs are. */
+  runtimeOwnerEnvironmentId?: string | null
   /** The value written, when the writer knows it: a listing that already shows it is not stale. */
   written?: string | null
   /** Runs once, after the write has landed, if this fence ever held a listing back. */
@@ -51,7 +52,7 @@ export class MetaWriteFence {
     worktreeId: string,
     executionHostId?: ExecutionHostId,
     identityKey?: string,
-    runtimeOwnerEnvironmentId?: string,
+    runtimeOwnerEnvironmentId?: string | null,
     options?: MetaWriteFenceOptions
   ): { landed: () => void; failed: () => void } {
     this.prune()
@@ -91,7 +92,7 @@ export class MetaWriteFence {
     executionHostId?: ExecutionHostId,
     fetchStartedAt?: number,
     identityKey?: string,
-    runtimeOwnerEnvironmentId?: string,
+    runtimeOwnerEnvironmentId?: string | null,
     incoming?: string | null
   ): boolean {
     this.prune()
@@ -148,13 +149,15 @@ function reconcile(entry: FenceEntry): void {
 // one checkout as rows sharing id and physical host, and a write for one must not fence the other's
 // refresh; and a folder rename retires the id a write began under while the row keeps its identity,
 // so a stale refresh merged under the new id must still meet the fence. Before rows have identities
-// the runtime owner tells them apart. A side that knows neither falls back to id and host, as before.
+// the runtime owner tells them apart, with `null` standing for the desktop-listed row, so a direct
+// write and a HUB listing for one checkout never share a fence. A side that knows neither falls back
+// to id and host, as before.
 function matches(
   entry: FenceEntry,
   worktreeId: string,
   executionHostId?: ExecutionHostId,
   identityKey?: string,
-  runtimeOwnerEnvironmentId?: string
+  runtimeOwnerEnvironmentId?: string | null
 ): boolean {
   if (entry.identityKey !== undefined && identityKey !== undefined) {
     return entry.identityKey === identityKey

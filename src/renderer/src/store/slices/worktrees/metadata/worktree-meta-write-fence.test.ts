@@ -78,6 +78,16 @@ describe('MetaWriteFence', () => {
     expect(fence.isPending('w', 'ssh:box', undefined, undefined, 'env-b')).toBe(false)
   })
 
+  // Regression: the desktop lists a checkout directly while a HUB also publishes it as an
+  // identity-less sibling; the direct write's fence matched the HUB listing on id and host.
+  it("keeps a direct row's write apart from an identity-less HUB sibling's listing", () => {
+    const { fence } = fenceAt(1000)
+    fence.begin('w', 'ssh:box', undefined, null)
+    expect(fence.isPending('w', 'ssh:box', undefined, undefined, 'env-hub')).toBe(false)
+    expect(fence.isPending('w', 'ssh:box', undefined, undefined, null)).toBe(true)
+    expect(fence.isPending('w', 'ssh:box')).toBe(true)
+  })
+
   it('falls back to id and host when either side has no runtime owner', () => {
     const { fence } = fenceAt(1000)
     fence.begin('w', 'ssh:box', undefined, 'env-a')

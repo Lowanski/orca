@@ -71,8 +71,10 @@ export type WorktreeMetaUpdateOptions = {
    *  published through two paired runtimes. Also routes persistence through that identity. */
   identityKey?: string
   /** The row's paired-runtime owner, for rows that have no canonical identity yet (detected-only
-   *  nested-SSH rows). Narrows the optimistic apply and routes persistence through that runtime. */
-  runtimeOwnerEnvironmentId?: string
+   *  nested-SSH rows). Narrows the optimistic apply and routes persistence through that runtime.
+   *  `null` pins the row the desktop lists itself (local or direct SSH), so a HUB-proxied sibling
+   *  with the same id and host is neither recolored nor written through. */
+  runtimeOwnerEnvironmentId?: string | null
   shouldApply?: WorktreeMetaUpdateGuard
   /** Skip the automatic review refetch when the caller owns an equivalent refresh. */
   suppressHostedReviewRefresh?: boolean

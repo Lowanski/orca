@@ -57,10 +57,23 @@ describe('workspace color tag assignment', () => {
       void result.current.handleAssignColorTag('#ef4444')
     })
 
+    // Why null: these rows have no runtime owner, so the write pins the desktop-listed row explicitly.
     expect(updateWorktreeMeta.mock.calls).toEqual([
-      ['repo::a', { colorTag: '#ef4444' }, { executionHostId: 'ssh-box' }],
-      ['repo::b', { colorTag: '#ef4444' }, { executionHostId: 'local' }],
-      ['repo::c', { colorTag: '#ef4444' }, { executionHostId: 'ssh-box' }]
+      [
+        'repo::a',
+        { colorTag: '#ef4444' },
+        { executionHostId: 'ssh-box', runtimeOwnerEnvironmentId: null }
+      ],
+      [
+        'repo::b',
+        { colorTag: '#ef4444' },
+        { executionHostId: 'local', runtimeOwnerEnvironmentId: null }
+      ],
+      [
+        'repo::c',
+        { colorTag: '#ef4444' },
+        { executionHostId: 'ssh-box', runtimeOwnerEnvironmentId: null }
+      ]
     ])
   })
 
@@ -78,7 +91,7 @@ describe('workspace color tag assignment', () => {
     expect(updateWorktreeMeta).toHaveBeenCalledWith(
       'repo::a',
       { colorTag: null },
-      { executionHostId: 'ssh-box' }
+      { executionHostId: 'ssh-box', runtimeOwnerEnvironmentId: null }
     )
   })
 })
@@ -99,7 +112,7 @@ describe('workspace color tag explicit targets', () => {
     expect(updateWorktreeMeta).toHaveBeenCalledWith(
       'repo::z',
       { colorTag: '#111111' },
-      { executionHostId: 'ssh-box' }
+      { executionHostId: 'ssh-box', runtimeOwnerEnvironmentId: null }
     )
   })
 })

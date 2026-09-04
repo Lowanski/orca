@@ -32,36 +32,51 @@ export function resolvePinnedOwnerRouting(
   requestedIdentityKey: string | undefined,
   pinnedCandidate: ReturnType<typeof findKnownWorktreeById>,
   executionHostId: ExecutionHostId | undefined,
-  /** Owner named by the caller for a row that has no canonical identity yet. */
-  requestedRuntimeOwnerEnvironmentId?: string
+  /** Owner named by the caller for a row that has no canonical identity yet; `null` names the row
+   *  the desktop lists itself. */
+  requestedRuntimeOwnerEnvironmentId?: string | null
 ): PinnedOwnerRouting {
   // Why the second clause: a detected-only nested-SSH row carries no identity, but the caller
   // knows which HUB it came from, and that alone is enough to route the write correctly.
   if (requestedIdentityKey === undefined && requestedRuntimeOwnerEnvironmentId !== undefined) {
-    return {
-      pinnedSettings: settingsForRuntimeEnvironmentOwner(
-        settings,
-        requestedRuntimeOwnerEnvironmentId
-      ),
-      recoveryFetchOptions: {
-        executionHostId: toRuntimeExecutionHostId(requestedRuntimeOwnerEnvironmentId)
-      }
-    }
+    // Why null routes direct: the caller says the desktop lists this row itself, so the id-and-host
+    // guess, which can pick a HUB proxying the same checkout, must not be consulted.
+    return requestedRuntimeOwnerEnvironmentId === null
+      ? directRouting(settings, executionHostId ?? hostOf(pinnedCandidate))
+      : runtimeRouting(settings, requestedRuntimeOwnerEnvironmentId)
   }
   if (requestedIdentityKey === undefined || !pinnedCandidate) {
     return { pinnedSettings: undefined, recoveryFetchOptions: undefined }
   }
-  const row = pinnedCandidate as Partial<Pick<Worktree, 'runtimeOwnerEnvironmentId' | 'hostId'>>
-  const ownerEnvironmentId = row.runtimeOwnerEnvironmentId
-  if (ownerEnvironmentId) {
-    return {
-      pinnedSettings: settingsForRuntimeEnvironmentOwner(settings, ownerEnvironmentId),
-      recoveryFetchOptions: { executionHostId: toRuntimeExecutionHostId(ownerEnvironmentId) }
-    }
+  const ownerEnvironmentId = hostFields(pinnedCandidate)?.runtimeOwnerEnvironmentId
+  return ownerEnvironmentId
+    ? runtimeRouting(settings, ownerEnvironmentId)
+    : directRouting(settings, executionHostId ?? hostOf(pinnedCandidate))
+}
+
+function runtimeRouting(settings: AppState['settings'], environmentId: string): PinnedOwnerRouting {
+  return {
+    pinnedSettings: settingsForRuntimeEnvironmentOwner(settings, environmentId),
+    recoveryFetchOptions: { executionHostId: toRuntimeExecutionHostId(environmentId) }
   }
-  const directHost = executionHostId ?? row.hostId
+}
+
+function directRouting(
+  settings: AppState['settings'],
+  directHost: ExecutionHostId | undefined
+): PinnedOwnerRouting {
   return {
     pinnedSettings: settingsForDirectOwner(settings),
     recoveryFetchOptions: directHost ? { executionHostId: directHost } : undefined
   }
+}
+
+function hostFields(
+  candidate: ReturnType<typeof findKnownWorktreeById>
+): Partial<Pick<Worktree, 'runtimeOwnerEnvironmentId' | 'hostId'>> | undefined {
+  return candidate
+}
+
+function hostOf(candidate: ReturnType<typeof findKnownWorktreeById>): ExecutionHostId | undefined {
+  return hostFields(candidate)?.hostId
 }

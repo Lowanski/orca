@@ -11,7 +11,7 @@ export type WorkspaceColorTagWriter = (
   options?: {
     executionHostId?: ExecutionHostId
     identityKey?: string
-    runtimeOwnerEnvironmentId?: string
+    runtimeOwnerEnvironmentId?: string | null
   }
 ) => Promise<WorktreeMetaWriteResult>
 
@@ -142,7 +142,9 @@ function drain(queue: IdentityQueue, write: WorkspaceColorTagWriter): void {
       identityKey: next.worktree.identity?.key,
       // Why: a detected-only nested-SSH row has no identity yet, and its runtime owner is the only
       // thing that tells it apart from a sibling exposed by another HUB or by the desktop directly.
-      runtimeOwnerEnvironmentId: next.worktree.runtimeOwnerEnvironmentId
+      // `null` says the desktop lists this row itself, so a HUB-proxied sibling with the same id and
+      // host is neither recolored nor written through.
+      runtimeOwnerEnvironmentId: next.worktree.runtimeOwnerEnvironmentId ?? null
     }
   )
     .then(

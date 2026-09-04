@@ -161,6 +161,20 @@ describe('assignWorkspaceColorTags', () => {
     settleAll()
   })
 
+  // Regression: an identity-less direct-SSH row was written with no pin at all, so the reducers
+  // recolored a HUB-proxied sibling too and the owner guess could persist through the HUB.
+  it('pins a desktop-listed row with an explicit null owner', () => {
+    const { write, settleAll } = deferredWriter()
+    const direct = { id: 'direct::d', hostId: 'ssh:box' } as unknown as Worktree
+    void assignWorkspaceColorTags([direct], '#111111', write, vi.fn())
+    expect(write.mock.calls[0]?.[2]).toMatchObject({
+      executionHostId: 'ssh:box',
+      runtimeOwnerEnvironmentId: null
+    })
+    expect(write.mock.calls[0]?.[2]?.identityKey).toBeUndefined()
+    settleAll()
+  })
+
   // Regression: the picker dropped its preview the instant it closed, and a folder or queued write
   // only reaches the store when it lands, so the card snapped back for the whole round trip.
   it('resolves only after the write has landed', async () => {

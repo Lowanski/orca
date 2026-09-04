@@ -266,8 +266,14 @@ export function createUpdateWorktreeMeta(
         executionHostId ?? existingWorktree?.hostId,
         {
           identityKey: requestedIdentityKey ?? worktreeForUpdate?.identity?.key,
+          // Why `?? null` only for a known row: a row the desktop lists itself has no owner, and the
+          // fence must tell it from a HUB's identity-less sibling; an unknown row stays unknown.
           runtimeOwnerEnvironmentId:
-            requestedRuntimeOwnerEnvironmentId ?? worktreeForUpdate?.runtimeOwnerEnvironmentId,
+            requestedRuntimeOwnerEnvironmentId !== undefined
+              ? requestedRuntimeOwnerEnvironmentId
+              : worktreeForUpdate
+                ? (worktreeForUpdate.runtimeOwnerEnvironmentId ?? null)
+                : undefined,
           // Why: a listing the fence held may have carried a peer's newer color, and the
           // notification it came from is not repeated; one refresh after landing settles it.
           onHeldColorTagListing: () => {

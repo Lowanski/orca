@@ -215,6 +215,79 @@ describe('identity-pinned writes across a rename while the write is failing', ()
   })
 })
 
+describe('direct-owner pins for identity-less rows the desktop lists itself', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetRemoteRuntimeMocks()
+  })
+
+  // Regression: the desktop listed a checkout directly while a HUB published it as an identity-less
+  // sibling with the same id and host; an unpinned write recolored both rows and the id-and-host owner
+  // guess persisted the tag through the HUB.
+  it('colors only the direct row and persists through the desktop', async () => {
+    const store = createTestStore()
+    const direct = makeWorktree({
+      id: 'repo1::/srv/dual',
+      repoId: 'repo1',
+      path: '/srv/dual',
+      hostId: 'ssh:box' as never,
+      colorTag: null
+    })
+    const viaHub = { ...direct, runtimeOwnerEnvironmentId: 'env-hub' }
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-hub' } as never,
+      worktreesByRepo: { repo1: [direct, viaHub] }
+    } as Partial<AppState>)
+
+    const result = await store
+      .getState()
+      .updateWorktreeMeta(
+        direct.id,
+        { colorTag: '#ef4444' },
+        { executionHostId: 'ssh:box' as never, runtimeOwnerEnvironmentId: null }
+      )
+
+    expect(result.ok).toBe(true)
+    expect(store.getState().worktreesByRepo.repo1.map((worktree) => worktree.colorTag)).toEqual([
+      '#ef4444',
+      null
+    ])
+    expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
+    expect(mockApi.worktrees.updateMeta).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports not-found when only a HUB still publishes the row', async () => {
+    const store = createTestStore()
+    const viaHub = {
+      ...makeWorktree({
+        id: 'repo1::/srv/dual',
+        repoId: 'repo1',
+        path: '/srv/dual',
+        hostId: 'ssh:box' as never,
+        colorTag: null
+      }),
+      runtimeOwnerEnvironmentId: 'env-hub'
+    }
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-hub' } as never,
+      worktreesByRepo: { repo1: [viaHub] }
+    } as Partial<AppState>)
+
+    const result = await store
+      .getState()
+      .updateWorktreeMeta(
+        viaHub.id,
+        { colorTag: '#ef4444' },
+        { executionHostId: 'ssh:box' as never, runtimeOwnerEnvironmentId: null }
+      )
+
+    expect(result.ok).toBe(false)
+    expect(store.getState().worktreesByRepo.repo1[0]?.colorTag).toBeNull()
+    expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
+    expect(mockApi.worktrees.updateMeta).not.toHaveBeenCalled()
+  })
+})
+
 describe('runtime-owner pins on folder workspaces', () => {
   beforeEach(() => {
     vi.clearAllMocks()

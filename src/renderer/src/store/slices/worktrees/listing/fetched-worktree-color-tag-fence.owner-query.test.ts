@@ -26,4 +26,12 @@ describe('preserveConcurrentColorTag fence query', () => {
     preserveConcurrentColorTag([row], [row], [row], () => true, 500)
     expect(pendingCalls.at(-1)).toEqual(['a', 'ssh:box', 500, undefined, 'env-b', null])
   })
+
+  // Regression: a desktop-listed row was reported with an unknown owner, so a HUB sibling's fence
+  // matched it on id and host alone.
+  it('reports a desktop-listed row as a null owner, not an unknown one', () => {
+    const row = { id: 'd', hostId: 'ssh:box', colorTag: null } as unknown as Worktree
+    preserveConcurrentColorTag([row], [row], [row], () => true, 500)
+    expect(pendingCalls.at(-1)).toEqual(['d', 'ssh:box', 500, undefined, null, null])
+  })
 })
