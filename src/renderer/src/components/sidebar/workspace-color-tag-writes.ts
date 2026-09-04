@@ -89,9 +89,18 @@ function enqueue(
   onError: (message: string) => void
 ): Promise<void> {
   const current = queueFor(worktree)
-  const previewIdentity = getWorkspaceColorTagIdentity(worktree)
-  current.previewIdentities.add(previewIdentity)
-  setWorkspaceColorTagPreviews([previewIdentity], colorTag, PENDING_WRITE_PREVIEW_OWNER)
+  // Why both keys: a not-yet-refreshed copy of this row still reads the channel under its
+  // pre-identity key, and it must show the pending color for the whole write, not the old strip.
+  const previewIdentities = [
+    ...new Set([
+      getWorkspaceColorTagIdentity(worktree),
+      getWorkspaceColorTagFallbackIdentity(worktree)
+    ])
+  ]
+  for (const identity of previewIdentities) {
+    current.previewIdentities.add(identity)
+  }
+  setWorkspaceColorTagPreviews(previewIdentities, colorTag, PENDING_WRITE_PREVIEW_OWNER)
   return new Promise<void>((resolve) => {
     // Latest wins: a newer value replaces an older pending one, and the older assignment's waiters
     // settle when the newer write lands — any later state satisfies them.

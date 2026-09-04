@@ -13,10 +13,13 @@ export function preserveConcurrentColorTag<T extends Worktree>(
   matchesRefreshHost: (worktree: Worktree) => boolean,
   requestStartedAt?: number
 ): T[] {
-  if (!requestStarted || !current) {
+  if (!current) {
     return [...incoming]
   }
-  const startedRows = requestStarted.filter(matchesRefreshHost)
+  // Why an empty snapshot rather than a bail-out: a refresh can begin before this repository has a
+  // catalog bucket at all; a row created and colored while it runs still has a write in flight that
+  // the listing predates, and the fence must be asked about it.
+  const startedRows = (requestStarted ?? []).filter(matchesRefreshHost)
   const currentRows = current.filter(matchesRefreshHost)
   const startedById = new Map(startedRows.map((worktree) => [worktree.id, worktree]))
   const currentById = new Map(currentRows.map((worktree) => [worktree.id, worktree]))

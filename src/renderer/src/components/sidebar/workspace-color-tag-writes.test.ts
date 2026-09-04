@@ -183,6 +183,26 @@ describe('assignWorkspaceColorTags', () => {
     expect(readWorkspaceColorTagPreview(folder)).toBeUndefined()
   })
 
+  // Regression: the pending preview sat under the promoted row's canonical key only, so a copy of the
+  // row that had not refreshed yet, reading under its pre-identity key, showed the old strip.
+  it('previews a pending color for copies of the row that still lack its identity', async () => {
+    const { write, settleAll } = deferredWriter()
+    const promoted = {
+      id: 'alias::w',
+      hostId: 'ssh:box',
+      identity: { key: 'k-alias' }
+    } as unknown as Worktree
+    const stale = { id: 'alias::w', hostId: 'ssh:box' } as unknown as Worktree
+
+    void assignWorkspaceColorTags([promoted], '#111111', write, vi.fn())
+    expect(readWorkspaceColorTagPreview(stale)).toBe('#111111')
+
+    settleAll()
+    await flush()
+    expect(readWorkspaceColorTagPreview(stale)).toBeUndefined()
+    expect(readWorkspaceColorTagPreview(promoted)).toBeUndefined()
+  })
+
   // Regression: an identity-less direct-SSH row was written with no pin at all, so the reducers
   // recolored a HUB-proxied sibling too and the owner guess could persist through the HUB.
   it('pins a desktop-listed row with an explicit null owner', () => {

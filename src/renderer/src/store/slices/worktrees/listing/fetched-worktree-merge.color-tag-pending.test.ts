@@ -72,6 +72,15 @@ describe('preserveConcurrentColorTag against a write that landed at t=1000', () 
     expect(merged[0]?.colorTag).toBe('#ef4444')
   })
 
+  // Regression: with no catalog bucket at refresh start the merge bailed out before the fence, so a
+  // row created and colored during the refresh lost its color to the pre-write listing.
+  it('still consults the fence when the refresh started before the repo had a catalog bucket', () => {
+    const held = preserveConcurrentColorTag(staleIncoming, undefined, current, anyHost, 900)
+    expect(held[0]?.colorTag).toBe('#ef4444')
+    const accepted = preserveConcurrentColorTag(staleIncoming, undefined, current, anyHost, 1100)
+    expect(accepted[0]?.colorTag).toBeNull()
+  })
+
   it('accepts the refreshed value for such a row once the fetch postdates the landing', () => {
     const merged = preserveConcurrentColorTag(staleIncoming, [], current, anyHost, 1100)
     expect(merged[0]?.colorTag).toBeNull()
