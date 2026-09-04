@@ -54,6 +54,33 @@ export function preserveConcurrentManualOrder<T extends Worktree>(
   })
 }
 
+export function preserveConcurrentColorTag<T extends Worktree>(
+  incoming: readonly T[],
+  requestStarted: readonly Worktree[] | undefined,
+  current: readonly Worktree[] | undefined,
+  matchesRefreshHost: (worktree: Worktree) => boolean
+): T[] {
+  if (!requestStarted || !current) {
+    return [...incoming]
+  }
+  const startedById = new Map(
+    requestStarted.filter(matchesRefreshHost).map((worktree) => [worktree.id, worktree])
+  )
+  const currentById = new Map(
+    current.filter(matchesRefreshHost).map((worktree) => [worktree.id, worktree])
+  )
+  return incoming.map((worktree) => {
+    const started = startedById.get(worktree.id)
+    const latest = currentById.get(worktree.id)
+    if (!started || !latest || (started.colorTag ?? null) === (latest.colorTag ?? null)) {
+      return worktree
+    }
+    // Why: a refresh that began before a color was assigned answers with the old tag, and color
+    // writes emit no local invalidation, so the stale response would win until an unrelated refresh.
+    return { ...worktree, colorTag: latest.colorTag ?? null }
+  })
+}
+
 export function preserveConcurrentDisplayName<T extends Worktree>(
   incoming: readonly T[],
   requestStarted: readonly Worktree[] | undefined,
@@ -153,8 +180,13 @@ export function mergeFetchedWorktrees(
     const refreshResult = {
       ...args.refresh.result,
       worktrees: preserveConcurrentDisplayName(
-        preserveConcurrentManualOrder(
-          args.refresh.result.worktrees,
+        preserveConcurrentColorTag(
+          preserveConcurrentManualOrder(
+            args.refresh.result.worktrees,
+            args.requestStartedWorktrees,
+            currentWorktrees,
+            (worktree) => worktreeMatchesHost(worktree, args.hostId, matchOptions)
+          ),
           args.requestStartedWorktrees,
           currentWorktrees,
           (worktree) => worktreeMatchesHost(worktree, args.hostId, matchOptions)

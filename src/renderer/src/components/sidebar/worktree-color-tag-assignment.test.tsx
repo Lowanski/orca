@@ -254,3 +254,60 @@ describe('workspace color tag explicit targets', () => {
     )
   })
 })
+
+describe('workspace color tag coalescing across overlapping selections', () => {
+  // Regression: a single pending slot let "green for A+C" replace a still-pending "blue for A+B",
+  // so B's color was never written.
+  it('keeps the newest color per workspace when later selections overlap earlier ones', async () => {
+    const resolvers: (() => void)[] = []
+    const updateWorktreeMeta = vi.fn<
+      (id: string, updates: { colorTag: string | null }) => Promise<{ ok: true }>
+    >(
+      () =>
+        new Promise<{ ok: true }>((resolve) => {
+          resolvers.push(() => resolve({ ok: true }))
+        })
+    )
+    const a = createWorktree('repo::a')
+    const b = createWorktree('repo::b')
+    const c = createWorktree('repo::c')
+    const { result } = renderCommands({ activeContextWorktrees: [a], updateWorktreeMeta })
+
+    act(() => result.current.handleAssignColorTag('#111111', [a]))
+    act(() => result.current.handleAssignColorTag('#0000ff', [a, b]))
+    act(() => result.current.handleAssignColorTag('#00ff00', [a, c]))
+
+    await act(async () => {
+      resolvers.shift()?.()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const second = updateWorktreeMeta.mock.calls.slice(1).map((call) => [call[0], call[1]])
+    expect(second).toEqual(
+      expect.arrayContaining([
+        ['repo::a', { colorTag: '#00ff00' }],
+        ['repo::b', { colorTag: '#0000ff' }],
+        ['repo::c', { colorTag: '#00ff00' }]
+      ])
+    )
+    expect(second).toHaveLength(3)
+  })
+
+  it('treats the same worktree id on two hosts as two targets', async () => {
+    const updateWorktreeMeta = vi.fn().mockResolvedValue({ ok: true })
+    const { result } = renderCommands({
+      activeContextWorktrees: [createWorktree('repo::a')],
+      updateWorktreeMeta
+    })
+
+    act(() =>
+      result.current.handleAssignColorTag('#111111', [
+        createWorktree('repo::a', 'ssh-box'),
+        createWorktree('repo::a')
+      ])
+    )
+
+    expect(updateWorktreeMeta).toHaveBeenCalledTimes(2)
+  })
+})

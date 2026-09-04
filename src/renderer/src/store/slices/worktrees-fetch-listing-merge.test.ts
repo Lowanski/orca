@@ -301,6 +301,41 @@ describe('fetchWorktrees', () => {
     expect(store.getState().worktreesByRepo.repo1[0]?.head).toBe('def456')
   })
 
+  // Regression: a refresh that began before a color was assigned answered with the old tag, and
+  // color writes deliberately emit no local invalidation, so the stale answer won until an
+  // unrelated refresh happened to run.
+  it('does not merge a stale color tag over an assignment completed during refresh', async () => {
+    const store = createTestStore()
+    const daily = makeWorktree({
+      id: 'repo1::/path/daily',
+      repoId: 'repo1',
+      path: '/path/daily',
+      colorTag: null
+    })
+    const refreshedDaily = { ...daily, head: 'def456' }
+    const detected = makeDetectedResult('repo1', [daily])
+    let resolveListing!: (worktrees: Worktree[]) => void
+    const listing = new Promise<Worktree[]>((resolve) => {
+      resolveListing = resolve
+    })
+    worktreeListMock.mockReturnValueOnce(listing)
+    store.setState({
+      worktreesByRepo: { repo1: [daily] },
+      detectedWorktreesByRepo: { repo1: detected }
+    } as Partial<AppState>)
+
+    const refresh = store.getState().fetchWorktrees('repo1')
+    await vi.waitFor(() => expect(worktreeListMock).toHaveBeenCalledTimes(1))
+    await store.getState().updateWorktreeMeta(daily.id, { colorTag: '#ef4444' })
+    resolveListing([refreshedDaily])
+
+    await refresh
+
+    expect(store.getState().worktreesByRepo.repo1[0]?.colorTag).toBe('#ef4444')
+    expect(store.getState().detectedWorktreesByRepo.repo1.worktrees[0]?.colorTag).toBe('#ef4444')
+    expect(store.getState().worktreesByRepo.repo1[0]?.head).toBe('def456')
+  })
+
   it('does not merge a stale display name over a rename completed during refresh', async () => {
     const store = createTestStore()
     const worktreeId = 'repo1::/path/wt1'

@@ -23,10 +23,12 @@ const SWATCH_OPTIONS: readonly SwatchOption[] = [
   CUSTOM_SWATCH
 ]
 
-// Why inline: it is a swatch, not a token — the wheel names the picker the way the hexes name
-// themselves, and no palette entry can stand for "any color".
-const CUSTOM_SWATCH_GRADIENT =
-  'conic-gradient(#ef4444, #eab308, #22c55e, #14b8a6, #8b5cf6, #ec4899, #ef4444)'
+// Why derive: the wheel stands for "any color" by sweeping the same palette the row offers, so a
+// palette change cannot leave the wheel showing colors the row no longer has (or missing ones it does).
+const CUSTOM_SWATCH_GRADIENT = `conic-gradient(${[
+  ...WORKSPACE_COLOR_TAG_SWATCHES,
+  WORKSPACE_COLOR_TAG_SWATCHES[0]
+].join(', ')})`
 
 type WorktreeColorTagMenuItemsProps = {
   colorTag: string | null

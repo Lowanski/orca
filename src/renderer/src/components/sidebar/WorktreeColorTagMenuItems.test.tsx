@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { WorktreeColorTagMenuItems } from './WorktreeColorTagMenuItems'
+import { WORKSPACE_COLOR_TAG_SWATCHES } from '../../../../shared/workspace-color-tag'
 
 vi.mock('@/components/ui/dropdown-menu', () => ({
   DropdownMenuItem: (props: {
@@ -63,6 +64,15 @@ describe('WorktreeColorTagMenuItems', () => {
   // slot as checked.
   it('checks nothing for a mixed selection', () => {
     expect(render({ colorTag: null, mixed: true })).not.toContain('aria-checked="true"')
+  })
+
+  // Regression: the wheel's gradient hard-coded a copy of the palette that had already drifted
+  // (it omitted orange), so palette edits would not reach the custom affordance.
+  it('sweeps every preset through the custom wheel', () => {
+    const wheel = swatchTag(render({ colorTag: null }), 'custom')
+    for (const swatch of WORKSPACE_COLOR_TAG_SWATCHES) {
+      expect(wheel).toContain(swatch)
+    }
   })
 
   it('disables the whole row when told the selection is deleting', () => {

@@ -1,5 +1,6 @@
 import { useCallback, useRef } from 'react'
 import { toast } from 'sonner'
+import { getWorktreeHostIdentity } from '../../../../shared/worktree/host-qualified-identity'
 import type { useAppStore } from '@/store'
 import type { Repo } from '../../../../shared/repo-types'
 import type { WorkspaceStatusDefinition, Worktree } from '../../../../shared/worktree/types'
@@ -49,37 +50,38 @@ export function useWorktreeContextMenuCommands(args: {
       { executionHostId: args.worktree.hostId ?? 'local' }
     )
   }, [args])
-  // Why coalesce: quick successive assignments (swatch clicks, a picker commit) must settle in
-  // order on a slow host — one write set in flight, and when it lands only the newest pending
-  // value is written. Each pending value carries its own targets: the menu can reopen on a
-  // different multi-selection while a write is still out, and the newer color must reach the
-  // newer selection, not the one captured when the queue started.
+  // Why coalesce per target: quick successive assignments (swatch clicks, a picker commit) must
+  // settle in order on a slow host — one write set in flight, and when it lands the newest pending
+  // color for *each* workspace is written. A single "latest batch" slot would let an assignment to
+  // A+C wholesale replace a still-pending assignment to A+B and silently drop B's color.
   const colorTagWriteRef = useRef<{
     inFlight: boolean
-    pending: { colorTag: string | null; targets: readonly Worktree[] } | null
-  }>({ inFlight: false, pending: null })
+    pending: Map<string, { worktree: Worktree; colorTag: string | null }>
+  }>({ inFlight: false, pending: new Map() })
   const handleAssignColorTag = useCallback(
     // Why explicit targets: the picker commits after the menu has closed, when the model's
     // active selection has already fallen back to the clicked row.
     (colorTag: string | null, targets: readonly Worktree[] = args.activeContextWorktrees) => {
       const state = colorTagWriteRef.current
-      state.pending = { colorTag, targets }
+      for (const worktree of targets) {
+        state.pending.set(getWorktreeHostIdentity(worktree), { worktree, colorTag })
+      }
       if (state.inFlight) {
         return
       }
       const drain = (): void => {
-        const next = state.pending
-        state.pending = null
-        if (!next) {
+        if (state.pending.size === 0) {
           state.inFlight = false
           return
         }
+        const batch = [...state.pending.values()]
+        state.pending.clear()
         state.inFlight = true
         void Promise.all(
-          next.targets.map((worktree) =>
+          batch.map(({ worktree, colorTag: next }) =>
             args.updateWorktreeMeta(
               worktree.id,
-              { colorTag: next.colorTag },
+              { colorTag: next },
               { executionHostId: worktree.hostId ?? 'local' }
             )
           )
