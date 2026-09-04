@@ -131,17 +131,33 @@ describe('assignWorkspaceColorTags', () => {
     settleAll()
   })
 
-  it('joins a not-yet-refreshed card to the queue its promoted row already holds', () => {
-    const { write, settleAll } = deferredWriter()
+  // Regression: the queued write took its pin from the stale copy and sent no identity, so a
+  // checkout replaced at the same path before it started could receive the color.
+  it('pins a write queued from a not-yet-refreshed card with the identity the queue learned', async () => {
+    const { write, settleNext, settleAll } = deferredWriter()
     const promoted = {
       id: 'promo::r',
       hostId: 'ssh:box',
-      identity: { key: 'k-r' }
+      identity: { key: 'k-r' },
+      runtimeOwnerEnvironmentId: 'env-r'
     } as unknown as Worktree
-    const stale = { id: 'promo::r', hostId: 'ssh:box' } as unknown as Worktree
+    // A copy that has not refreshed lacks the identity, not the owner its listing came with.
+    const stale = {
+      id: 'promo::r',
+      hostId: 'ssh:box',
+      runtimeOwnerEnvironmentId: 'env-r'
+    } as unknown as Worktree
     void assignWorkspaceColorTags([promoted], '#111111', write, vi.fn())
     void assignWorkspaceColorTags([stale], '#222222', write, vi.fn())
     expect(write).toHaveBeenCalledTimes(1)
+
+    settleNext()
+    await flush()
+    expect(write).toHaveBeenCalledTimes(2)
+    expect(write.mock.calls[1]?.[2]).toMatchObject({
+      identityKey: 'k-r',
+      runtimeOwnerEnvironmentId: 'env-r'
+    })
     settleAll()
   })
 

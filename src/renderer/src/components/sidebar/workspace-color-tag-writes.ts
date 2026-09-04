@@ -34,8 +34,9 @@ type PendingWrite = {
 type IdentityQueue = {
   inFlight: boolean
   pending: PendingWrite | undefined
-  /** The canonical identity this queue serves, once a row carrying one has joined it. */
-  canonical: string | undefined
+  /** The row carrying the canonical identity this queue serves, once one has joined it. Every later
+   *  write is pinned with its identity and owner, even one queued from a copy that still lacks them. */
+  canonicalRow: Worktree | undefined
   /** Every key this queue has previewed under; cleared together once the queue drains. */
   previewIdentities: Set<string>
 }
@@ -134,15 +135,15 @@ function queueFor(worktree: Worktree): IdentityQueue {
   const fallback =
     canonical === undefined ? identity : getWorkspaceColorTagFallbackIdentity(worktree)
   const byFallback = queues.get(fallback)
-  if (canonical !== undefined && byFallback && byFallback.canonical === undefined) {
-    byFallback.canonical = canonical
+  if (canonical !== undefined && byFallback && byFallback.canonicalRow === undefined) {
+    byFallback.canonicalRow = worktree
     queues.set(identity, byFallback)
     return byFallback
   }
   const queue: IdentityQueue = {
     inFlight: false,
     pending: undefined,
-    canonical,
+    canonicalRow: canonical === undefined ? undefined : worktree,
     previewIdentities: new Set()
   }
   queues.set(identity, queue)
@@ -167,18 +168,22 @@ function drain(queue: IdentityQueue, write: WorkspaceColorTagWriter): void {
     return
   }
   queue.inFlight = true
-  // Why the identity: the queue is keyed by it, so the write must land on that exact row too.
+  // Why the identity: the queue is keyed by it, so the write must land on that exact row too. A write
+  // queued from a copy that has not refreshed yet carries no identity of its own; it takes the pin
+  // from the canonical row the queue already learned, or a checkout replaced at the same path before
+  // this write starts would receive it.
+  const pinRow = next.worktree.identity?.key ? next.worktree : (queue.canonicalRow ?? next.worktree)
   write(
     next.worktree.id,
     { colorTag: next.colorTag },
     {
       executionHostId: next.worktree.hostId ?? 'local',
-      identityKey: next.worktree.identity?.key,
+      identityKey: pinRow.identity?.key,
       // Why: a detected-only nested-SSH row has no identity yet, and its runtime owner is the only
       // thing that tells it apart from a sibling exposed by another HUB or by the desktop directly.
       // `null` says the desktop lists this row itself, so a HUB-proxied sibling with the same id and
       // host is neither recolored nor written through.
-      runtimeOwnerEnvironmentId: next.worktree.runtimeOwnerEnvironmentId ?? null
+      runtimeOwnerEnvironmentId: pinRow.runtimeOwnerEnvironmentId ?? null
     }
   )
     .then(
