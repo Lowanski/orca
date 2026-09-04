@@ -272,6 +272,33 @@ describe('assignWorkspaceColorTags', () => {
     settleAll()
   })
 
+  // Regression: the pre-identity alias stayed with the predecessor until it drained, so a copy of the
+  // replacement that still lacked its identity joined the old queue and was pinned to the old row.
+  it('joins an identity-less copy to the replacement occupant before the predecessor drains', async () => {
+    const { write, settleNext, settleAll } = deferredWriter()
+    const old = {
+      id: 'repl::u',
+      hostId: 'ssh:box',
+      identity: { key: 'k-old3' }
+    } as unknown as Worktree
+    const replacement = { ...old, identity: { key: 'k-new3' } } as unknown as Worktree
+    const copy = { id: 'repl::u', hostId: 'ssh:box' } as unknown as Worktree
+
+    void assignWorkspaceColorTags([old], '#111111', write, vi.fn())
+    void assignWorkspaceColorTags([replacement], '#222222', write, vi.fn())
+    void assignWorkspaceColorTags([copy], '#333333', write, vi.fn())
+    expect(write).toHaveBeenCalledTimes(2)
+
+    settleNext()
+    await flush()
+    expect(write).toHaveBeenCalledTimes(2)
+    settleNext()
+    await flush()
+    expect(write).toHaveBeenCalledTimes(3)
+    expect(write.mock.calls[2]?.[2]).toMatchObject({ identityKey: 'k-new3' })
+    settleAll()
+  })
+
   // Regression: an identity-less direct-SSH row was written with no pin at all, so the reducers
   // recolored a HUB-proxied sibling too and the owner guess could persist through the HUB.
   it('pins a desktop-listed row with an explicit null owner', () => {

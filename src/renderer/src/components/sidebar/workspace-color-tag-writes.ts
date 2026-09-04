@@ -155,9 +155,11 @@ function queueFor(worktree: Worktree): IdentityQueue {
     fallbackKey: fallback
   }
   queues.set(identity, queue)
-  if (!queues.has(fallback)) {
-    queues.set(fallback, queue)
-  }
+  // Why the newest occupant owns the pre-identity key: a checkout replaced at the same path while
+  // its predecessor's write is pending gives two canonical queues one fallback key, and a copy that
+  // still addresses the row without an identity means the current occupant, not the one on its way
+  // out. An identity-less queue is unaffected: its identity and fallback are the same string.
+  queues.set(fallback, queue)
   return queue
 }
 
