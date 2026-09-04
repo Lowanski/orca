@@ -219,6 +219,59 @@ describe('assignWorkspaceColorTags', () => {
     expect(readWorkspaceColorTagPreview(promoted)).toBeUndefined()
   })
 
+  // Regression: every queue previewed under one shared owner, so when a checkout was replaced while
+  // its predecessor's write was pending, the predecessor's drain cleared the successor's pending
+  // preview and an identity-less copy lost the strip before the new write landed.
+  it("keeps the successor occupant's pending preview when the predecessor's queue drains", async () => {
+    const { write, settleNext, settleAll } = deferredWriter()
+    const old = {
+      id: 'repl::w',
+      hostId: 'ssh:box',
+      identity: { key: 'k-old' }
+    } as unknown as Worktree
+    const replacement = { ...old, identity: { key: 'k-new' } } as unknown as Worktree
+    const copy = { id: 'repl::w', hostId: 'ssh:box' } as unknown as Worktree
+
+    void assignWorkspaceColorTags([old], '#111111', write, vi.fn())
+    void assignWorkspaceColorTags([replacement], '#222222', write, vi.fn())
+    expect(write).toHaveBeenCalledTimes(2)
+    expect(readWorkspaceColorTagPreview(copy)).toBe('#222222')
+
+    settleNext()
+    await flush()
+    expect(readWorkspaceColorTagPreview(copy)).toBe('#222222')
+    settleAll()
+    await flush()
+    expect(readWorkspaceColorTagPreview(copy)).toBeUndefined()
+  })
+
+  // Regression: the fallback alias stayed bound to the predecessor's queue and died with it, so a
+  // later write from a still identity-less copy opened a third concurrent queue and an older RPC
+  // could land last.
+  it('hands the fallback alias to the surviving occupant once the predecessor drains', async () => {
+    const { write, settleNext, settleAll } = deferredWriter()
+    const old = {
+      id: 'repl::v',
+      hostId: 'ssh:box',
+      identity: { key: 'k-old2' }
+    } as unknown as Worktree
+    const replacement = { ...old, identity: { key: 'k-new2' } } as unknown as Worktree
+    const copy = { id: 'repl::v', hostId: 'ssh:box' } as unknown as Worktree
+
+    void assignWorkspaceColorTags([old], '#111111', write, vi.fn())
+    void assignWorkspaceColorTags([replacement], '#222222', write, vi.fn())
+    settleNext()
+    await flush()
+
+    void assignWorkspaceColorTags([copy], '#333333', write, vi.fn())
+    expect(write).toHaveBeenCalledTimes(2)
+    settleNext()
+    await flush()
+    expect(write).toHaveBeenCalledTimes(3)
+    expect(write.mock.calls[2]?.[2]).toMatchObject({ identityKey: 'k-new2' })
+    settleAll()
+  })
+
   // Regression: an identity-less direct-SSH row was written with no pin at all, so the reducers
   // recolored a HUB-proxied sibling too and the owner guess could persist through the HUB.
   it('pins a desktop-listed row with an explicit null owner', () => {

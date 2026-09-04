@@ -7,7 +7,8 @@ import {
 import {
   clearWorkspaceColorTagPreviews,
   createWorkspaceColorTagPreviewOwner,
-  setWorkspaceColorTagPreviews
+  setWorkspaceColorTagPreviews,
+  type WorkspaceColorTagPreviewOwner
 } from './workspace-color-tag-preview'
 
 type WorktreeMetaWriteResult = { ok: true } | { ok: false; error: string }
@@ -39,14 +40,19 @@ type IdentityQueue = {
   canonicalRow: Worktree | undefined
   /** Every key this queue has previewed under; cleared together once the queue drains. */
   previewIdentities: Set<string>
+  /**
+   * Why preview from here: a folder workspace on a paired runtime has no optimistic store apply and
+   * can wait the full RPC timeout, so the card would show the old strip with no feedback. The pending
+   * color goes through the same channel the picker uses, and the menu row reads it too, so the toggle
+   * matches what the card shows. Cleared only once the queue drains, so a superseded color never
+   * flashes the old value between writes. Why one owner per queue: a checkout replaced at the same
+   * path while its predecessor's write is pending gives two queues one fallback key, and the
+   * predecessor's drain must not clear the successor's pending preview.
+   */
+  previewOwner: WorkspaceColorTagPreviewOwner
+  /** The pre-identity key this queue answers to; handed to a surviving queue for the same path on drain. */
+  fallbackKey: string
 }
-
-// Why preview from here: a folder workspace on a paired runtime has no optimistic store apply and
-// can wait the full RPC timeout, so the card would show the old strip with no feedback. The pending
-// color goes through the same channel the picker uses, and the menu row reads it too, so the toggle
-// matches what the card shows. Cleared only once the queue drains, so a superseded color never
-// flashes the old value between writes.
-const PENDING_WRITE_PREVIEW_OWNER = createWorkspaceColorTagPreviewOwner()
 
 /**
  * Color-tag write ordering, shared by every context-menu instance.
@@ -101,7 +107,7 @@ function enqueue(
   for (const identity of previewIdentities) {
     current.previewIdentities.add(identity)
   }
-  setWorkspaceColorTagPreviews(previewIdentities, colorTag, PENDING_WRITE_PREVIEW_OWNER)
+  setWorkspaceColorTagPreviews(previewIdentities, colorTag, current.previewOwner)
   return new Promise<void>((resolve) => {
     // Latest wins: a newer value replaces an older pending one, and the older assignment's waiters
     // settle when the newer write lands — any later state satisfies them.
@@ -144,7 +150,9 @@ function queueFor(worktree: Worktree): IdentityQueue {
     inFlight: false,
     pending: undefined,
     canonicalRow: canonical === undefined ? undefined : worktree,
-    previewIdentities: new Set()
+    previewIdentities: new Set(),
+    previewOwner: createWorkspaceColorTagPreviewOwner(),
+    fallbackKey: fallback
   }
   queues.set(identity, queue)
   if (!queues.has(fallback)) {
@@ -158,11 +166,22 @@ function drain(queue: IdentityQueue, write: WorkspaceColorTagWriter): void {
   queue.pending = undefined
   if (!next) {
     queue.inFlight = false
-    clearWorkspaceColorTagPreviews([...queue.previewIdentities], PENDING_WRITE_PREVIEW_OWNER)
+    clearWorkspaceColorTagPreviews([...queue.previewIdentities], queue.previewOwner)
     queue.previewIdentities.clear()
     for (const [key, registered] of queues) {
       if (registered === queue) {
         queues.delete(key)
+      }
+    }
+    // Why rebind: two occupants of one path can share the fallback key for a moment (a checkout
+    // replaced while its predecessor's write is pending). Once the predecessor is gone, a copy that
+    // still addresses the row without an identity must join the survivor, not open a third queue.
+    if (!queues.has(queue.fallbackKey)) {
+      const survivor = [...new Set(queues.values())].find(
+        (registered) => registered.fallbackKey === queue.fallbackKey
+      )
+      if (survivor) {
+        queues.set(queue.fallbackKey, survivor)
       }
     }
     return
