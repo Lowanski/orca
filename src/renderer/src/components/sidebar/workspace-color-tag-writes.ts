@@ -29,54 +29,37 @@ type PendingWrite = {
   worktree: Worktree
   colorTag: string | null
   onError: (message: string) => void
-  /** Resolvers for every assignment this value satisfies — its own and any it superseded. */
+  /** Resolvers for every assignment this value satisfies, its own and any it superseded. */
   settle: (() => void)[]
 }
 
 type IdentityQueue = {
   inFlight: boolean
   pending: PendingWrite | undefined
-  /** The row carrying the canonical identity this queue serves, once one has joined it. Every later
-   *  write is pinned with its identity and owner, even one queued from a copy that still lacks them. */
+  /** Row carrying the canonical identity this queue serves; later writes are pinned with it. */
   canonicalRow: Worktree | undefined
-  /** Every key this queue has previewed under; cleared together once the queue drains. */
+  /** Keys previewed under; cleared together on drain. */
   previewIdentities: Set<string>
-  /** Every representation that has enqueued here, by canonical key; all of them show the newest color. */
+  /** Every representation that enqueued here; all of them show the newest pending color. */
   previewRows: Map<string, Worktree>
-  /**
-   * Why preview from here: a folder workspace on a paired runtime has no optimistic store apply and
-   * can wait the full RPC timeout, so the card would show the old strip with no feedback. The pending
-   * color goes through the same channel the picker uses, and the menu row reads it too, so the toggle
-   * matches what the card shows. Cleared only once the queue drains, so a superseded color never
-   * flashes the old value between writes. Why one owner per queue: a checkout replaced at the same
-   * path while its predecessor's write is pending gives two queues one fallback key, and the
-   * predecessor's drain must not clear the successor's pending preview.
-   */
+  /** Per queue, so a predecessor's drain never clears a successor's pending preview. */
   previewOwner: WorkspaceColorTagPreviewOwner
-  /** The pre-identity key this queue answers to; handed to a surviving queue for the same path on drain. */
+  /** The pre-identity key this queue currently answers to. */
   fallbackKey: string
-  /** Creation order; a draining queue hands its alias only to a newer occupant, never an older one. */
+  /** Creation order; a pre-identity key only ever moves to a newer queue. */
   sequence: number
 }
 
-/**
- * Color-tag write ordering, shared by every context-menu instance.
- *
- * Why module-level: each card mounts its own menu hook, so a per-hook queue lets A's menu and B's
- * menu write the same workspace concurrently and an older request that settles last wins. One
- * queue per canonical identity serializes writes to a workspace no matter which card issued
- * them; the newest pending color for that workspace is what gets written when the in-flight one
- * lands. Nothing here touches the store directly — the writer is injected.
- */
+// One queue per workspace, shared by every menu instance: writes serialize no matter which card
+// issued them, and the newest pending color is what lands next. The writer is injected.
 const queues = new Map<string, IdentityQueue>()
 let nextQueueSequence = 0
-/** The newest queue ever to claim each pre-identity key; only it may get the key back on a drain. */
+/** The newest queue ever to claim each pre-identity key; only it may take the key back on a drain. */
 const latestClaim = new Map<string, number>()
 
 /**
- * Assign `colorTag` to every target. Resolves once each target's write — or a newer one that
- * superseded it — has landed, so callers can hold a preview until the store reflects the change.
- * A refused or failed write is reported once per call.
+ * Assign `colorTag` to every target. Resolves once each target's write, or a newer one that
+ * superseded it, has landed. A refused or failed write is reported once per call.
  */
 export function assignWorkspaceColorTags(
   targets: readonly Worktree[],
@@ -104,10 +87,8 @@ function enqueue(
   onError: (message: string) => void
 ): Promise<void> {
   const current = queueFor(worktree)
-  // Why every row the queue has seen: the canonical row and a copy that has not refreshed yet are
-  // one workspace, and whichever of them enqueues the newest color, both must show it at once rather
-  // than after the next round trip. Pre-identity keys stay scoped to the occupant the queue knows,
-  // so a checkout replaced at this path never shows this row's pending color.
+  // Every representation of the workspace shows the newest color at once; pre-identity layers stay
+  // scoped to the occupant so a replacement checkout never inherits them.
   current.previewRows.set(getWorkspaceColorTagIdentity(worktree), worktree)
   const rows = [...current.previewRows.values()]
   for (const key of workspaceColorTagPreviewKeysFor(rows)) {
@@ -120,8 +101,7 @@ function enqueue(
     current.canonicalRow?.identity?.key
   )
   return new Promise<void>((resolve) => {
-    // Latest wins: a newer value replaces an older pending one, and the older assignment's waiters
-    // settle when the newer write lands — any later state satisfies them.
+    // Latest wins; a superseded assignment settles when the newer write lands.
     current.pending = {
       worktree,
       colorTag,
@@ -134,23 +114,24 @@ function enqueue(
   })
 }
 
-/**
- * Why two keys: a background refresh can promote an identity-less row to its canonical identity
- * while a write queued under its host-and-owner key is still in flight, and a card that has not
- * refreshed yet can still address the row without its identity. Registering the queue under both
- * keys keeps such writes in one line instead of racing two RPCs whose handlers may settle out of
- * order. A queue that already serves another identity is never adopted: two HUBs' rows for one
- * checkout share the fallback key and must stay separate.
- */
+// Resolution order: the canonical key, then an identity-less queue already open under the same
+// pre-identity key (a refresh promoted the row mid-flight). Two canonical queues sharing a
+// pre-identity key (two HUBs' rows for one checkout) stay separate.
 function queueFor(worktree: Worktree): IdentityQueue {
   const identity = getWorkspaceColorTagIdentity(worktree)
-  const direct = queues.get(identity)
-  if (direct) {
-    return direct
-  }
   const canonical = worktree.identity?.key
   const fallback =
     canonical === undefined ? identity : getWorkspaceColorTagFallbackIdentity(worktree)
+  const direct = queues.get(identity)
+  if (direct) {
+    if (canonical !== undefined) {
+      // A rename keeps the identity but moves the pre-identity key; follow it, or a copy of the
+      // renamed row that has not refreshed yet opens a second queue.
+      direct.canonicalRow = worktree
+      claimFallback(direct, fallback)
+    }
+    return direct
+  }
   const byFallback = queues.get(fallback)
   if (canonical !== undefined && byFallback && byFallback.canonicalRow === undefined) {
     byFallback.canonicalRow = worktree
@@ -168,13 +149,22 @@ function queueFor(worktree: Worktree): IdentityQueue {
     sequence: ++nextQueueSequence
   }
   queues.set(identity, queue)
-  // Why the newest occupant owns the pre-identity key: a checkout replaced at the same path while
-  // its predecessor's write is pending gives two canonical queues one fallback key, and a copy that
-  // still addresses the row without an identity means the current occupant, not the one on its way
-  // out. An identity-less queue is unaffected: its identity and fallback are the same string.
-  queues.set(fallback, queue)
-  latestClaim.set(fallback, queue.sequence)
+  claimFallback(queue, fallback)
   return queue
+}
+
+/** The newest occupant owns a pre-identity key; an older queue never takes it from a newer one. */
+function claimFallback(queue: IdentityQueue, fallback: string): void {
+  if (queue.fallbackKey !== fallback && latestClaim.get(queue.fallbackKey) === queue.sequence) {
+    latestClaim.delete(queue.fallbackKey)
+  }
+  queue.fallbackKey = fallback
+  const holder = queues.get(fallback)
+  if (holder && holder !== queue && holder.sequence > queue.sequence) {
+    return
+  }
+  queues.set(fallback, queue)
+  latestClaim.set(fallback, Math.max(latestClaim.get(fallback) ?? 0, queue.sequence))
 }
 
 function drain(queue: IdentityQueue, write: WorkspaceColorTagWriter): void {
@@ -190,12 +180,8 @@ function drain(queue: IdentityQueue, write: WorkspaceColorTagWriter): void {
         queues.delete(key)
       }
     }
-    // Why rebind: two occupants of one path can share the fallback key for a moment (a checkout
-    // replaced while its predecessor's write is pending). Once the predecessor is gone, a copy that
-    // still addresses the row without an identity must join the survivor, not open a third queue.
-    // Only the latest claimant qualifies: when the newest occupant finished first, neither its
-    // predecessor nor a superseded intermediate may inherit the key and pin later writes to a row
-    // on its way out.
+    // Only the latest claimant may take the pre-identity key back; a predecessor or a superseded
+    // intermediate never does, so later writes cannot be pinned to a row on its way out.
     const remaining = [...new Set(queues.values())].filter(
       (registered) => registered.fallbackKey === queue.fallbackKey
     )
@@ -212,10 +198,8 @@ function drain(queue: IdentityQueue, write: WorkspaceColorTagWriter): void {
     return
   }
   queue.inFlight = true
-  // Why the identity: the queue is keyed by it, so the write must land on that exact row too. A write
-  // queued from a copy that has not refreshed yet carries no identity of its own; it takes the pin
-  // from the canonical row the queue already learned, or a checkout replaced at the same path before
-  // this write starts would receive it.
+  // A copy without an identity is pinned with the queue's canonical row, so a checkout replaced at
+  // the same path never receives the write; a `null` owner marks a row the desktop lists itself.
   const pinRow = next.worktree.identity?.key ? next.worktree : (queue.canonicalRow ?? next.worktree)
   write(
     next.worktree.id,
@@ -223,17 +207,12 @@ function drain(queue: IdentityQueue, write: WorkspaceColorTagWriter): void {
     {
       executionHostId: next.worktree.hostId ?? 'local',
       identityKey: pinRow.identity?.key,
-      // Why: a detected-only nested-SSH row has no identity yet, and its runtime owner is the only
-      // thing that tells it apart from a sibling exposed by another HUB or by the desktop directly.
-      // `null` says the desktop lists this row itself, so a HUB-proxied sibling with the same id and
-      // host is neither recolored nor written through.
       runtimeOwnerEnvironmentId: pinRow.runtimeOwnerEnvironmentId ?? null
     }
   )
     .then(
       (result) => {
-        // Why: an older remote host refuses with { ok: false }; without this the only signal is
-        // the strip quietly disappearing on the next refresh.
+        // An older host refuses with ok:false; surface it, or the strip just vanishes on refresh.
         if (!result.ok) {
           next.onError(result.error)
         }

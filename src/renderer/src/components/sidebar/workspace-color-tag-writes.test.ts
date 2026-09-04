@@ -402,6 +402,37 @@ describe('assignWorkspaceColorTags', () => {
     expect(readWorkspaceColorTagPreview(canonical)).toBeUndefined()
   })
 
+  // Regression: a queue found by its canonical key kept the pre-rename row and never registered the
+  // renamed row's pre-identity key, so a not-yet-promoted copy of the renamed row opened a second
+  // queue and two RPCs raced.
+  it('follows a rename so a copy of the renamed row joins the queue and is pinned to the new row', async () => {
+    const { write, settleNext, settleAll } = deferredWriter()
+    const before = {
+      id: 'ren::before',
+      hostId: 'ssh:box',
+      identity: { key: 'k-ren' }
+    } as unknown as Worktree
+    const after = {
+      id: 'ren::after',
+      hostId: 'ssh:box',
+      identity: { key: 'k-ren' }
+    } as unknown as Worktree
+    const copyOfAfter = { id: 'ren::after', hostId: 'ssh:box' } as unknown as Worktree
+
+    void assignWorkspaceColorTags([before], '#111111', write, vi.fn())
+    void assignWorkspaceColorTags([after], '#222222', write, vi.fn())
+    void assignWorkspaceColorTags([copyOfAfter], '#333333', write, vi.fn())
+    expect(write).toHaveBeenCalledTimes(1)
+
+    settleNext()
+    await flush()
+    expect(write).toHaveBeenCalledTimes(2)
+    expect(write.mock.calls[1]?.[0]).toBe('ren::after')
+    expect(write.mock.calls[1]?.[1]).toEqual({ colorTag: '#333333' })
+    expect(write.mock.calls[1]?.[2]).toMatchObject({ identityKey: 'k-ren' })
+    settleAll()
+  })
+
   // Regression: an identity-less direct-SSH row was written with no pin at all, so the reducers
   // recolored a HUB-proxied sibling too and the owner guess could persist through the HUB.
   it('pins a desktop-listed row with an explicit null owner', () => {
