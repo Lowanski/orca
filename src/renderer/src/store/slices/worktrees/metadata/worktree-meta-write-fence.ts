@@ -71,6 +71,11 @@ export class MetaWriteFence {
     this.entries.add(entry)
     return {
       landed: () => {
+        // Why the membership check: clear() may have dropped this entry (tests reset the fence
+        // between cases); a late landing must not revive it or fire its refresh into the next test.
+        if (!this.entries.has(entry)) {
+          return
+        }
         entry.releasedAt = this.now()
         if (entry.held) {
           this.requestReconcile(entry)
@@ -139,7 +144,7 @@ export class MetaWriteFence {
   // Why deferred: the merge that asks the fence runs inside a store reducer; the refresh must start
   // after that reducer has returned.
   private requestReconcile(entry: FenceEntry): void {
-    if (entry.reconcileAt !== null || !entry.onHeldListing) {
+    if (entry.reconcileAt !== null || !entry.onHeldListing || !this.entries.has(entry)) {
       return
     }
     entry.reconcileAt = this.now()

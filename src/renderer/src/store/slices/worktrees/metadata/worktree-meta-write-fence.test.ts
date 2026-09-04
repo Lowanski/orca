@@ -175,6 +175,20 @@ describe('MetaWriteFence', () => {
     expect(onHeldListing).not.toHaveBeenCalled()
   })
 
+  // Regression: clear() dropped the entry, but a late landed() still saw it held and queued its
+  // refresh into whatever test ran next.
+  it('ignores a late landing after clear', async () => {
+    const onHeldListing = vi.fn()
+    const { fence } = fenceAt(1000)
+    const { landed } = fence.begin('w', 'local', undefined, undefined, { onHeldListing })
+    fence.isPending('w', 'local', 900)
+    fence.clear()
+    landed()
+    await Promise.resolve()
+    expect(onHeldListing).not.toHaveBeenCalled()
+    expect(fence.isPending('w', 'local', 900)).toBe(false)
+  })
+
   it('clear drops every entry', () => {
     const { fence } = fenceAt(1000)
     fence.begin('w', 'local').landed()

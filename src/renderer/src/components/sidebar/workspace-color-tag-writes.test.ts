@@ -371,7 +371,7 @@ describe('assignWorkspaceColorTags', () => {
 
   // Regression: a newer color enqueued from a not-yet-refreshed copy previewed under the pre-identity
   // key only, so the canonical card kept the older color until the next write started.
-  it('shows the newest pending color on every representation of the row', () => {
+  it('shows the newest pending color on every representation of the row', async () => {
     const { write, settleAll } = deferredWriter()
     const canonical = {
       id: 'dup::w',
@@ -386,13 +386,20 @@ describe('assignWorkspaceColorTags', () => {
     } as unknown as Worktree
     const replacement = { ...canonical, identity: { key: 'k-dup-2' } } as unknown as Worktree
 
-    void assignWorkspaceColorTags([canonical], '#111111', write, vi.fn())
-    void assignWorkspaceColorTags([copy], '#222222', write, vi.fn())
+    const first = assignWorkspaceColorTags([canonical], '#111111', write, vi.fn())
+    const second = assignWorkspaceColorTags([copy], '#222222', write, vi.fn())
     expect(write).toHaveBeenCalledTimes(1)
     expect(readWorkspaceColorTagPreview(canonical)).toBe('#222222')
     expect(readWorkspaceColorTagPreview(copy)).toBe('#222222')
     expect(readWorkspaceColorTagPreview(replacement)).toBeUndefined()
+
+    // Why settle both: the second write starts in a later continuation; leaving it pending would
+    // let queue and preview state outlive this test.
     settleAll()
+    await vi.waitFor(() => expect(write).toHaveBeenCalledTimes(2))
+    settleAll()
+    await Promise.all([first, second])
+    expect(readWorkspaceColorTagPreview(canonical)).toBeUndefined()
   })
 
   // Regression: an identity-less direct-SSH row was written with no pin at all, so the reducers
