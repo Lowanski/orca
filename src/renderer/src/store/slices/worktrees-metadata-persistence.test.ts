@@ -469,3 +469,58 @@ describe('worktree remote runtime mutations', () => {
     )
   })
 })
+
+describe('identity-pinned worktree metadata writes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetRemoteRuntimeMocks()
+  })
+
+  // Regression: two paired runtimes publish one nested-SSH checkout as two rows with the same id
+  // and host. The identity key pinned the selector, but the transport was still chosen from id and
+  // host, so the pinned HUB never received the write and a later refresh reverted the color.
+  it('persists through the runtime that owns the pinned row, not the active one', async () => {
+    const store = createTestStore()
+    const shared = makeWorktree({
+      id: 'repo1::/path/shared',
+      repoId: 'repo1',
+      path: '/path/shared',
+      colorTag: null
+    })
+    const viaA = {
+      ...shared,
+      identity: { key: 'k-a' } as never,
+      runtimeOwnerEnvironmentId: 'env-a'
+    }
+    const viaB = {
+      ...shared,
+      identity: { key: 'k-b' } as never,
+      runtimeOwnerEnvironmentId: 'env-b'
+    }
+    runtimeEnvironmentCall.mockResolvedValue({
+      id: 'rpc-set',
+      ok: true,
+      result: { worktree: { ...viaB, colorTag: '#ef4444' } },
+      _meta: { runtimeId: 'runtime-b' }
+    })
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-a' } as never,
+      worktreesByRepo: { repo1: [viaA, viaB] }
+    } as Partial<AppState>)
+
+    await store
+      .getState()
+      .updateWorktreeMeta(shared.id, { colorTag: '#ef4444' }, { identityKey: 'k-b' })
+
+    expect(mockApi.worktrees.updateMeta).not.toHaveBeenCalled()
+    expect(runtimeEnvironmentCall).toHaveBeenCalledTimes(1)
+    const call = JSON.stringify(runtimeEnvironmentCall.mock.calls[0])
+    expect(call).toContain('env-b')
+    expect(call).not.toContain('env-a')
+    expect(call).toContain('identity:k-b')
+    expect(store.getState().worktreesByRepo.repo1.map((worktree) => worktree.colorTag)).toEqual([
+      null,
+      '#ef4444'
+    ])
+  })
+})

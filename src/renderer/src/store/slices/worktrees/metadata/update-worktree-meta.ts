@@ -1,3 +1,4 @@
+import type { Worktree } from '../../../../../../shared/worktree/types'
 import type { WorktreeSlice } from '../../worktree-helpers'
 import type { WorktreeSliceGet, WorktreeSliceSet } from '../listing/worktree-slice-types'
 import { translate } from '@/i18n/i18n'
@@ -27,6 +28,7 @@ import { persistWorktreeMeta } from './worktree-meta-persist'
 import { updateFolderWorkspaceMeta } from './update-folder-workspace-meta'
 import { isRuntimeSelectorNotFoundError } from '../listing/runtime-worktree-rpc-errors'
 import {
+  settingsForRuntimeEnvironmentOwner,
   settingsForWorktreeOwner,
   trySettingsForWorktreeOwner
 } from '../listing/worktree-owner-settings'
@@ -238,8 +240,17 @@ export function createUpdateWorktreeMeta(
     }
 
     try {
+      // Why: an identity-pinned row names its own paired runtime; the id-and-host owner lookup
+      // could pick a sibling HUB or local and the pinned HUB would never persist the write.
+      const pinnedOwnerEnvironmentId =
+        requestedIdentityKey !== undefined
+          ? (worktreeForUpdate as Partial<Pick<Worktree, 'runtimeOwnerEnvironmentId'>> | undefined)
+              ?.runtimeOwnerEnvironmentId
+          : undefined
       await persistWorktreeMeta(
-        settingsForWorktreeOwner(get(), worktreeId, executionHostId),
+        pinnedOwnerEnvironmentId
+          ? settingsForRuntimeEnvironmentOwner(get().settings, pinnedOwnerEnvironmentId)
+          : settingsForWorktreeOwner(get(), worktreeId, executionHostId),
         worktreeId,
         enriched,
         executionHostId ?? existingWorktree?.hostId,

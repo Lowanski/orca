@@ -51,6 +51,24 @@ describe('MetaWriteFence', () => {
     expect(fence.isPending('w', 'local', 0)).toBe(false)
   })
 
+  // Regression: HUB A and HUB B expose rows with the same id and physical host; a write for A's
+  // row fenced B's refresh and replaced B's fresh tag with its stale local value.
+  it('does not let a write for one HUB row fence a refresh of the sibling row', () => {
+    const { fence } = fenceAt(1000)
+    fence.begin('w', 'ssh:box', 'k-a')
+    expect(fence.isPending('w', 'ssh:box', undefined, 'k-a')).toBe(true)
+    expect(fence.isPending('w', 'ssh:box', undefined, 'k-b')).toBe(false)
+  })
+
+  it('falls back to id and host when either side has no identity', () => {
+    const { fence } = fenceAt(1000)
+    fence.begin('w', 'ssh:box', 'k-a')
+    expect(fence.isPending('w', 'ssh:box')).toBe(true)
+    const { fence: legacy } = fenceAt(1000)
+    legacy.begin('w', 'ssh:box')
+    expect(legacy.isPending('w', 'ssh:box', undefined, 'k-b')).toBe(true)
+  })
+
   it('matches a host-agnostic query against a host-scoped entry and vice versa', () => {
     const { fence } = fenceAt(1000)
     fence.begin('w', 'ssh:box')

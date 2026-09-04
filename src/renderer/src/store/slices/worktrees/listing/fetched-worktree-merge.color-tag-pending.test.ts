@@ -2,10 +2,18 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Worktree } from '../../../../../../shared/worktree/types'
 
 // Why mock: the fence is fed by real persistence; here the question is only what the merge does
-// with its answer. This stand-in reports a write that landed at t=1000.
+// with its answer. This stand-in reports a write that landed at t=1000 and records every query.
+const pendingCalls = vi.hoisted(() => [] as unknown[][])
 vi.mock('../metadata/worktree-meta-persist', () => ({
-  isColorTagPersistencePending: (_id: string, _host: string | undefined, fetchStartedAt?: number) =>
-    fetchStartedAt !== undefined && fetchStartedAt <= 1000,
+  isColorTagPersistencePending: (
+    id: string,
+    host: string | undefined,
+    fetchStartedAt?: number,
+    identityKey?: string
+  ) => {
+    pendingCalls.push([id, host, fetchStartedAt, identityKey])
+    return fetchStartedAt !== undefined && fetchStartedAt <= 1000
+  },
   isDisplayNamePersistencePending: () => false
 }))
 
@@ -54,5 +62,19 @@ describe('preserveConcurrentColorTag against a write that landed at t=1000', () 
       anyHost
     )
     expect(merged[0]?.colorTag).toBe('#ef4444')
+  })
+
+  // Regression: two HUBs' rows for one checkout share id and host; the fence has to be asked about
+  // exactly the row being merged, or a write for the sibling fences this one.
+  it('asks the fence about the current row by its canonical identity', () => {
+    pendingCalls.length = 0
+    const identified = {
+      id: 'a',
+      hostId: 'local',
+      colorTag: '#ef4444',
+      identity: { key: 'k-a' }
+    } as unknown as Worktree
+    preserveConcurrentColorTag(staleIncoming, startedAfterWrite, [identified], anyHost, 900)
+    expect(pendingCalls).toEqual([['a', 'local', 900, 'k-a']])
   })
 })

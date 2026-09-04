@@ -84,6 +84,20 @@ export function settingsForKnownRepoOwner(
     : ({ activeRuntimeEnvironmentId: null } as AppState['settings'])
 }
 
+/**
+ * Settings that route through one specific paired runtime. Why: when two HUBs publish the same
+ * checkout, id plus physical host is ambiguous, but the identity-matched row already names its
+ * transport owner, so a caller that pinned a row by identity must not fall back to the guess.
+ */
+export function settingsForRuntimeEnvironmentOwner(
+  settings: AppState['settings'],
+  environmentId: string
+): AppState['settings'] {
+  return settings
+    ? { ...settings, activeRuntimeEnvironmentId: environmentId }
+    : ({ activeRuntimeEnvironmentId: environmentId } as AppState['settings'])
+}
+
 export function trySettingsForWorktreeOwner(
   state: Pick<
     AppState,

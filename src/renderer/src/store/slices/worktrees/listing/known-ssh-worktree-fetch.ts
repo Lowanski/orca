@@ -24,7 +24,8 @@ import { getCurrentDirectSshAuthority } from './direct-ssh-authority'
 import {
   acquireDetectedWorktreeRefreshLeaseForRepo,
   normalizeNotAdmittedProviderResult,
-  qualifiedProviderResultIsAdmitted
+  qualifiedProviderResultIsAdmitted,
+  rememberLeaseStart
 } from './detected-worktree-refresh'
 import { isDetectedWorktreeListResult } from './detected-worktree-provider-request'
 import { staleDetectedWorktreeProviderResult } from './detected-worktree-refresh-admission'
@@ -255,6 +256,9 @@ export function acquireDirectSshDetectedWorktreeRefresh(
       const refresh: AdmittedDetectedWorktreeRefresh = {
         status: 'admitted',
         result: providerResult.result,
+        // Why: a caller that joined this lease started later than the scan it shares; the merge
+        // fences on the scan's start, or a color that landed in between is undone by pre-write data.
+        startedAt: rememberLeaseStart(lease.providerRequestId),
         providerResult,
         executionHostId: request.executionHostId,
         directSshAuthority: request.authority

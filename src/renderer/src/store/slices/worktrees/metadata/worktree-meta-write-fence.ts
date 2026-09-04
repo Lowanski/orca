@@ -3,6 +3,8 @@ import type { ExecutionHostId } from '../../../../../../shared/execution-host'
 type FenceEntry = {
   worktreeId: string
   executionHostId?: ExecutionHostId
+  /** Canonical row identity when the writer knew it; lets two HUBs' rows for one checkout differ. */
+  identityKey?: string
   /** Null while the write is in flight; the settle time once it has landed. */
   releasedAt: number | null
 }
@@ -32,10 +34,11 @@ export class MetaWriteFence {
    */
   begin(
     worktreeId: string,
-    executionHostId?: ExecutionHostId
+    executionHostId?: ExecutionHostId,
+    identityKey?: string
   ): { landed: () => void; failed: () => void } {
     this.prune()
-    const entry: FenceEntry = { worktreeId, executionHostId, releasedAt: null }
+    const entry: FenceEntry = { worktreeId, executionHostId, identityKey, releasedAt: null }
     this.entries.add(entry)
     return {
       landed: () => {
@@ -54,11 +57,12 @@ export class MetaWriteFence {
   isPending(
     worktreeId: string,
     executionHostId?: ExecutionHostId,
-    fetchStartedAt?: number
+    fetchStartedAt?: number,
+    identityKey?: string
   ): boolean {
     this.prune()
     for (const entry of this.entries) {
-      if (!matches(entry, worktreeId, executionHostId)) {
+      if (!matches(entry, worktreeId, executionHostId, identityKey)) {
         continue
       }
       if (entry.releasedAt === null) {
@@ -81,15 +85,24 @@ export class MetaWriteFence {
   }
 }
 
+// Why identity wins when both sides have one: two HUBs can publish one checkout as rows sharing id
+// and physical host, and a write for one must not fence the other's refresh. A side without an
+// identity falls back to id and host, as before.
 function matches(
   entry: FenceEntry,
   worktreeId: string,
-  executionHostId?: ExecutionHostId
+  executionHostId?: ExecutionHostId,
+  identityKey?: string
 ): boolean {
+  if (entry.worktreeId !== worktreeId) {
+    return false
+  }
+  if (entry.identityKey !== undefined && identityKey !== undefined) {
+    return entry.identityKey === identityKey
+  }
   return (
-    entry.worktreeId === worktreeId &&
-    (entry.executionHostId === undefined ||
-      executionHostId === undefined ||
-      entry.executionHostId === executionHostId)
+    entry.executionHostId === undefined ||
+    executionHostId === undefined ||
+    entry.executionHostId === executionHostId
   )
 }

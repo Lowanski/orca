@@ -67,9 +67,10 @@ export function isDisplayNamePersistencePending(
 export function isColorTagPersistencePending(
   worktreeId: string,
   executionHostId?: ExecutionHostId,
-  fetchStartedAt?: number
+  fetchStartedAt?: number,
+  identityKey?: string
 ): boolean {
-  return colorTagWriteFence.isPending(worktreeId, executionHostId, fetchStartedAt)
+  return colorTagWriteFence.isPending(worktreeId, executionHostId, fetchStartedAt, identityKey)
 }
 
 export function persistWorktreeMeta(
@@ -98,7 +99,7 @@ export function persistWorktreeMeta(
     onFailed.push(drop)
   }
   if ('colorTag' in updates) {
-    const fence = colorTagWriteFence.begin(worktreeId, executionHostId)
+    const fence = colorTagWriteFence.begin(worktreeId, executionHostId, identityKey)
     onLanded.push(fence.landed)
     onFailed.push(fence.failed)
   }

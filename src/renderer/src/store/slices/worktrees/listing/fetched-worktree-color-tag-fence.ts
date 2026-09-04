@@ -29,7 +29,12 @@ export function preserveConcurrentColorTag<T extends Worktree>(
     // in-flight write tells the stale answer apart. Color writes emit no local invalidation, so
     // without this the old tag would stick until an unrelated refresh.
     if (
-      isColorTagPersistencePending(worktree.id, latest.hostId, requestStartedAt) ||
+      isColorTagPersistencePending(
+        worktree.id,
+        latest.hostId,
+        requestStartedAt,
+        latest.identity?.key
+      ) ||
       (started.colorTag ?? null) !== (latest.colorTag ?? null)
     ) {
       return { ...worktree, colorTag: latest.colorTag ?? null }

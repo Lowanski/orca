@@ -249,7 +249,7 @@ export async function listDetectedWorktreesForRepoCoalesced(
 const LEASE_START_TTL_MS = 60_000
 const leaseStartedAtByRequestId = new Map<string, number>()
 
-function rememberLeaseStart(providerRequestId: string): number {
+export function rememberLeaseStart(providerRequestId: string): number {
   const now = Date.now()
   for (const [id, at] of leaseStartedAtByRequestId) {
     if (now - at > LEASE_START_TTL_MS) {
