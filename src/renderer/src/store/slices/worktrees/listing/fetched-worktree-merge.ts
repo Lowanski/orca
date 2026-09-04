@@ -19,7 +19,10 @@ import {
 } from '../metadata/hosted-review-link-mutation'
 import { isCurrentDetectedWorktreeRefresh } from './detected-worktree-refresh-admission'
 import { buildWorktreePurgeState } from '../teardown/worktree-purge-state'
-import { isDisplayNamePersistencePending } from '../metadata/worktree-meta-persist'
+import {
+  isColorTagPersistencePending,
+  isDisplayNamePersistencePending
+} from '../metadata/worktree-meta-persist'
 import { branchName } from '@/lib/git-utils'
 import {
   forgetAuthoritativelyRemovedWorktrees,
@@ -72,12 +75,20 @@ export function preserveConcurrentColorTag<T extends Worktree>(
   return incoming.map((worktree) => {
     const started = startedById.get(worktree.id)
     const latest = currentById.get(worktree.id)
-    if (!started || !latest || (started.colorTag ?? null) === (latest.colorTag ?? null)) {
+    if (!started || !latest) {
       return worktree
     }
-    // Why: a refresh that began before a color was assigned answers with the old tag, and color
-    // writes emit no local invalidation, so the stale response would win until an unrelated refresh.
-    return { ...worktree, colorTag: latest.colorTag ?? null }
+    // Why the pending guard: a fetch that started after the assignment but joined a listing
+    // captured before it sees started and latest already equal to the new color, so only the
+    // in-flight write tells the stale answer apart. Color writes emit no local invalidation, so
+    // without this the old tag would stick until an unrelated refresh.
+    if (
+      isColorTagPersistencePending(worktree.id, latest.hostId) ||
+      (started.colorTag ?? null) !== (latest.colorTag ?? null)
+    ) {
+      return { ...worktree, colorTag: latest.colorTag ?? null }
+    }
+    return worktree
   })
 }
 

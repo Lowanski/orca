@@ -23,7 +23,8 @@ type WorktreeColorTagPickerPopoverProps = {
   /** Host-qualified identities of every card the picker is previewing for. */
   previewIdentities: readonly string[]
   onOpenChange: (open: boolean) => void
-  onCommitColorTag: (colorTag: string | null) => void
+  /** Resolves once the write has landed in the store; the preview is held until then. */
+  onCommitColorTag: (colorTag: string | null) => Promise<void>
   /** Runs as the popover closes; hands focus back to the sidebar the way the menu does. */
   onRestoreFocus: (event: Event) => void
 }
@@ -118,6 +119,9 @@ export function WorktreeColorTagPickerPopover({
   onRestoreFocus
 }: WorktreeColorTagPickerPopoverProps): React.JSX.Element {
   const lastValidRef = useRef<string | null>(null)
+  // Why: a folder or queued write reaches the store only when it lands. Dropping the preview the
+  // instant the popover closes made the card snap back to its old strip for the whole round trip.
+  const committingRef = useRef(false)
 
   const clearPreviews = useCallback(
     () => clearWorkspaceColorTagPreviews(previewIdentities),
@@ -125,19 +129,34 @@ export function WorktreeColorTagPickerPopover({
   )
 
   // Why gate on open: every card mounts one of these. A closed bystander that unmounts — the list
-  // is virtualized — must not clear the previews an open picker on another card is driving.
+  // is virtualized — must not clear the previews an open picker on another card is driving. A
+  // close that is committing keeps its preview until the write lands.
   useEffect(() => {
     if (!open) {
       return undefined
     }
-    return clearPreviews
+    return () => {
+      if (!committingRef.current) {
+        clearPreviews()
+      }
+    }
   }, [clearPreviews, open])
 
   const commitAndClose = useCallback(() => {
-    if (lastValidRef.current) {
-      onCommitColorTag(lastValidRef.current)
+    const colorTag = lastValidRef.current
+    if (colorTag) {
+      committingRef.current = true
+      // Why swallow: the coordinator reports failures itself; here a rejection only means the
+      // preview should stop being held, and letting it escape would surface as an unhandled error.
+      void onCommitColorTag(colorTag)
+        .catch(() => undefined)
+        .finally(() => {
+          committingRef.current = false
+          clearPreviews()
+        })
+    } else {
+      clearPreviews()
     }
-    clearPreviews()
     onOpenChange(false)
   }, [clearPreviews, onCommitColorTag, onOpenChange])
 

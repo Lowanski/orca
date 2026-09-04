@@ -2,7 +2,7 @@
 
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
@@ -48,6 +48,8 @@ import { useWorkspaceColorTagPreview } from './workspace-color-tag-preview'
 const POINT = { x: 0, y: 0 }
 const IDENTITY = 'local::repo::a'
 
+type CommitMock = Mock<(colorTag: string | null) => Promise<void>>
+
 // Reads the preview channel the way the card does, so assertions cover the real consumer hook.
 let latestPreview: string | undefined
 function PreviewProbe(): null {
@@ -55,8 +57,10 @@ function PreviewProbe(): null {
   return null
 }
 
-function mount(props: { colorTag: string | null; open?: boolean }) {
-  const onCommitColorTag = vi.fn()
+function mount(props: { colorTag: string | null; open?: boolean; onCommitColorTag?: CommitMock }) {
+  const onCommitColorTag: CommitMock =
+    props.onCommitColorTag ??
+    vi.fn<(colorTag: string | null) => Promise<void>>().mockResolvedValue(undefined)
   const onOpenChange = vi.fn()
   const container = document.createElement('div')
   document.body.appendChild(container)
@@ -97,6 +101,11 @@ function pressEnter(target: HTMLElement): void {
   )
 }
 
+const settle = async (): Promise<void> => {
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
 describe('WorktreeColorTagPickerPopover', () => {
   let mounted: ReturnType<typeof mount> | null = null
   beforeEach(() => {
@@ -123,11 +132,14 @@ describe('WorktreeColorTagPickerPopover', () => {
     expect(mounted.onCommitColorTag).not.toHaveBeenCalled()
   })
 
-  it('commits the final value exactly once on Enter, clears the preview, and closes', () => {
+  it('commits the final value exactly once on Enter, clears the preview once it lands, and closes', async () => {
     mounted = mount({ colorTag: null })
     act(() => pickerOnChange.current?.('#112233'))
     act(() => pickerOnChange.current?.('#445566'))
-    act(() => pressEnter(mounted!.input))
+    await act(async () => {
+      pressEnter(mounted!.input)
+      await settle()
+    })
 
     expect(mounted.onCommitColorTag.mock.calls).toEqual([['#445566']])
     expect(latestPreview).toBeUndefined()
@@ -198,6 +210,63 @@ describe('WorktreeColorTagPickerPopover', () => {
     expect(mounted.onCommitColorTag.mock.calls).toEqual([['#112233']])
   })
 
+  // Regression: the wheel was fed the raw field text, so `#1` and `#12` made it jump or blank
+  // while the user typed a replacement.
+  it('keeps the wheel on the last complete color while the field holds a partial draft', () => {
+    mounted = mount({ colorTag: '#ef4444' })
+    act(() => typeInto(mounted!.input, '#1'))
+    expect(mounted.wheel.getAttribute('data-color')).toBe('#ef4444')
+    expect(mounted.input.value).toBe('#1')
+
+    act(() => typeInto(mounted!.input, '#123456'))
+    expect(mounted.wheel.getAttribute('data-color')).toBe('#123456')
+  })
+
+  it('falls back to the last wheel color, not the seed, when a typed draft goes partial', () => {
+    mounted = mount({ colorTag: null })
+    act(() => pickerOnChange.current?.('#112233'))
+    act(() => typeInto(mounted!.input, '#a'))
+    expect(mounted.wheel.getAttribute('data-color')).toBe('#112233')
+  })
+
+  // Regression: the preview was cleared the instant the popover closed, but a folder or queued
+  // write only reaches the store when it lands, so the card snapped back to its old strip.
+  it('holds the preview until the commit has landed, then clears it', async () => {
+    let land!: () => void
+    const commit: CommitMock = vi.fn<(colorTag: string | null) => Promise<void>>(
+      () =>
+        new Promise<void>((resolve) => {
+          land = resolve
+        })
+    )
+    mounted = mount({ colorTag: null, onCommitColorTag: commit })
+    act(() => pickerOnChange.current?.('#112233'))
+    act(() => pressEnter(mounted!.input))
+
+    expect(commit).toHaveBeenCalledWith('#112233')
+    expect(mounted.onOpenChange).toHaveBeenCalledWith(false)
+    expect(latestPreview).toBe('#112233')
+
+    await act(async () => {
+      land()
+      await settle()
+    })
+    expect(latestPreview).toBeUndefined()
+  })
+
+  it('still clears the preview if the commit fails', async () => {
+    const commit: CommitMock = vi
+      .fn<(colorTag: string | null) => Promise<void>>()
+      .mockRejectedValue(new Error('host away'))
+    mounted = mount({ colorTag: null, onCommitColorTag: commit })
+    act(() => pickerOnChange.current?.('#112233'))
+    await act(async () => {
+      pressEnter(mounted!.input)
+      await settle()
+    })
+    expect(latestPreview).toBeUndefined()
+  })
+
   it('drops its preview when the card unmounts mid-drag', () => {
     mounted = mount({ colorTag: null })
     act(() => pickerOnChange.current?.('#112233'))
@@ -233,7 +302,9 @@ describe('WorktreeColorTagPickerPopover', () => {
           menuPoint={POINT}
           previewIdentities={[IDENTITY]}
           onOpenChange={vi.fn()}
-          onCommitColorTag={vi.fn()}
+          onCommitColorTag={vi
+            .fn<(colorTag: string | null) => Promise<void>>()
+            .mockResolvedValue(undefined)}
           onRestoreFocus={vi.fn()}
         />
       )
@@ -242,25 +313,6 @@ describe('WorktreeColorTagPickerPopover', () => {
     bystander.remove()
 
     expect(latestPreview).toBe('#112233')
-  })
-
-  // Regression: the wheel was fed the raw field text, so `#1` and `#12` made it jump or blank
-  // while the user typed a replacement.
-  it('keeps the wheel on the last complete color while the field holds a partial draft', () => {
-    mounted = mount({ colorTag: '#ef4444' })
-    act(() => typeInto(mounted!.input, '#1'))
-    expect(mounted.wheel.getAttribute('data-color')).toBe('#ef4444')
-    expect(mounted.input.value).toBe('#1')
-
-    act(() => typeInto(mounted!.input, '#123456'))
-    expect(mounted.wheel.getAttribute('data-color')).toBe('#123456')
-  })
-
-  it('falls back to the last wheel color, not the seed, when a typed draft goes partial', () => {
-    mounted = mount({ colorTag: null })
-    act(() => pickerOnChange.current?.('#112233'))
-    act(() => typeInto(mounted!.input, '#a'))
-    expect(mounted.wheel.getAttribute('data-color')).toBe('#112233')
   })
 
   it('seeds the wheel from the current tag', () => {

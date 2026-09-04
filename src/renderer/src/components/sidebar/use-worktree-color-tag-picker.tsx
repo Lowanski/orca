@@ -24,7 +24,8 @@ type WorktreeColorTagPickerArgs = {
   /** Any selected workspace is deleting, so the row must not write into a half-failing batch. */
   disabled: boolean
   isMultiContext: boolean
-  onAssignColorTag: (colorTag: string | null, targets: readonly Worktree[]) => void
+  /** Resolves once the write has landed in the store, so the picker can hold its preview. */
+  onAssignColorTag: (colorTag: string | null, targets: readonly Worktree[]) => Promise<void>
   /** The menu's own focus restore, run only when no picker is pending. */
   restoreMenuFocus: (event: Event) => void
   /** Tells the menu model a picker is pending or open, so its lifecycle does not complete under it. */

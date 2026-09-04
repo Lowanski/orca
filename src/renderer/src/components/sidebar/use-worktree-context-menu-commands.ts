@@ -1,6 +1,6 @@
-import { useCallback, useRef } from 'react'
+import { useCallback } from 'react'
 import { toast } from 'sonner'
-import { getWorktreeHostIdentity } from '../../../../shared/worktree/host-qualified-identity'
+import { assignWorkspaceColorTags } from './workspace-color-tag-writes'
 import type { useAppStore } from '@/store'
 import type { Repo } from '../../../../shared/repo-types'
 import type { WorkspaceStatusDefinition, Worktree } from '../../../../shared/worktree/types'
@@ -54,58 +54,13 @@ export function useWorktreeContextMenuCommands(args: {
   // settle in order on a slow host — one write set in flight, and when it lands the newest pending
   // color for *each* workspace is written. A single "latest batch" slot would let an assignment to
   // A+C wholesale replace a still-pending assignment to A+B and silently drop B's color.
-  // Why lazy: the renderer's useRef ratchet forbids work in the initializer — `new Map()` there
-  // would allocate on every render and be discarded after the first — so the queue is built on
-  // first use inside the handler.
-  const colorTagWriteRef = useRef<{
-    inFlight: boolean
-    pending: Map<string, { worktree: Worktree; colorTag: string | null }>
-  } | null>(null)
   const handleAssignColorTag = useCallback(
     // Why explicit targets: the picker commits after the menu has closed, when the model's
     // active selection has already fallen back to the clicked row.
-    (colorTag: string | null, targets: readonly Worktree[] = args.activeContextWorktrees) => {
-      const state = (colorTagWriteRef.current ??= { inFlight: false, pending: new Map() })
-      for (const worktree of targets) {
-        state.pending.set(getWorktreeHostIdentity(worktree), { worktree, colorTag })
-      }
-      if (state.inFlight) {
-        return
-      }
-      const drain = (): void => {
-        if (state.pending.size === 0) {
-          state.inFlight = false
-          return
-        }
-        const batch = [...state.pending.values()]
-        state.pending.clear()
-        state.inFlight = true
-        void Promise.all(
-          batch.map(({ worktree, colorTag: next }) =>
-            args.updateWorktreeMeta(
-              worktree.id,
-              { colorTag: next },
-              { executionHostId: worktree.hostId ?? 'local' }
-            )
-          )
-        )
-          .then(
-            (results) => {
-              // Why: an older remote host is refused with { ok: false }; without this the only
-              // signal is the strip quietly disappearing on the next refresh.
-              const failed = results.find((result) => !result.ok)
-              if (failed && !failed.ok) {
-                toast.error(failed.error)
-              }
-            },
-            (error: unknown) => {
-              toast.error(error instanceof Error ? error.message : String(error))
-            }
-          )
-          .then(drain)
-      }
-      drain()
-    },
+    (colorTag: string | null, targets: readonly Worktree[] = args.activeContextWorktrees) =>
+      assignWorkspaceColorTags(targets, colorTag, args.updateWorktreeMeta, (message) =>
+        toast.error(message)
+      ),
     [args]
   )
   const handleTogglePin = useCallback(() => {

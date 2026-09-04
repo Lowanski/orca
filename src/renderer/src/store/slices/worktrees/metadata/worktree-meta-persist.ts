@@ -17,15 +17,18 @@ import type { WorktreeMeta } from '../../../../../../shared/worktree/meta-types'
 import type { ExecutionHostId } from '../../../../../../shared/execution-host'
 import { encodePushTargetClearForRuntimeRpc } from './hosted-review-link-mutation'
 
-type PendingDisplayNameWrite = {
+type PendingMetaWrite = {
   worktreeId: string
   executionHostId?: ExecutionHostId
 }
 
-const pendingDisplayNameWrites = new Set<PendingDisplayNameWrite>()
+// Why one set per field: the fetched-worktree merge asks per field whether a write is still in
+// flight so a refresh that joined a listing captured before the write cannot restore the old value.
+const pendingDisplayNameWrites = new Set<PendingMetaWrite>()
+const pendingColorTagWrites = new Set<PendingMetaWrite>()
 
-function pendingDisplayNameWriteMatches(
-  write: PendingDisplayNameWrite,
+function pendingWriteMatches(
+  write: PendingMetaWrite,
   worktreeId: string,
   executionHostId?: ExecutionHostId
 ): boolean {
@@ -37,16 +40,31 @@ function pendingDisplayNameWriteMatches(
   )
 }
 
-export function isDisplayNamePersistencePending(
+function hasPendingWrite(
+  writes: ReadonlySet<PendingMetaWrite>,
   worktreeId: string,
   executionHostId?: ExecutionHostId
 ): boolean {
-  for (const write of pendingDisplayNameWrites) {
-    if (pendingDisplayNameWriteMatches(write, worktreeId, executionHostId)) {
+  for (const write of writes) {
+    if (pendingWriteMatches(write, worktreeId, executionHostId)) {
       return true
     }
   }
   return false
+}
+
+export function isDisplayNamePersistencePending(
+  worktreeId: string,
+  executionHostId?: ExecutionHostId
+): boolean {
+  return hasPendingWrite(pendingDisplayNameWrites, worktreeId, executionHostId)
+}
+
+export function isColorTagPersistencePending(
+  worktreeId: string,
+  executionHostId?: ExecutionHostId
+): boolean {
+  return hasPendingWrite(pendingColorTagWrites, worktreeId, executionHostId)
 }
 
 export function persistWorktreeMeta(
@@ -63,18 +81,23 @@ export function persistWorktreeMeta(
     executionHostId,
     identityKey
   )
-  if (!('displayName' in updates)) {
+  const trackers = [
+    'displayName' in updates ? pendingDisplayNameWrites : null,
+    'colorTag' in updates ? pendingColorTagWrites : null
+  ].filter((tracker): tracker is Set<PendingMetaWrite> => tracker !== null)
+  if (trackers.length === 0) {
     return operation
   }
-  const write: PendingDisplayNameWrite = {
-    worktreeId,
-    executionHostId
+  const write: PendingMetaWrite = { worktreeId, executionHostId }
+  for (const tracker of trackers) {
+    tracker.add(write)
   }
-  pendingDisplayNameWrites.add(write)
-  void operation.then(
-    () => pendingDisplayNameWrites.delete(write),
-    () => pendingDisplayNameWrites.delete(write)
-  )
+  const release = (): void => {
+    for (const tracker of trackers) {
+      tracker.delete(write)
+    }
+  }
+  void operation.then(release, release)
   return operation
 }
 
