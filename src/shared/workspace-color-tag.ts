@@ -70,3 +70,11 @@ export function getWorkspaceColorTagIdentity(
     ? JSON.stringify([hostIdentity, worktree.runtimeOwnerEnvironmentId])
     : hostIdentity
 }
+
+/** The key the same row had before it gained a canonical identity; readers check both, because a
+ *  background refresh can promote a row while a preview or a queued write still uses the old key. */
+export function getWorkspaceColorTagFallbackIdentity(
+  worktree: Pick<Worktree, 'id' | 'hostId' | 'identity' | 'runtimeOwnerEnvironmentId'>
+): string {
+  return getWorkspaceColorTagIdentity({ ...worktree, identity: undefined })
+}

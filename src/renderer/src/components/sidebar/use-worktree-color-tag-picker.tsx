@@ -8,6 +8,7 @@ import {
 } from '../../../../shared/workspace-color-tag'
 import { DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { WorktreeColorTagMenuItems } from './WorktreeColorTagMenuItems'
+import { useWorkspaceColorTagPreviewsForWorktrees } from './workspace-color-tag-preview'
 import { WorktreeColorTagPickerPopover } from './WorktreeColorTagPickerPopover'
 import {
   CLOSE_ALL_CONTEXT_MENUS_EVENT,
@@ -159,9 +160,17 @@ export function useWorktreeColorTagPicker({
     [clearInactiveTimer, onActiveChange]
   )
 
+  // Why previews: a write in flight (a folder row over a slow runtime) shows on the card through the
+  // preview channel before the store changes; the row's checked swatch and its toggle must agree
+  // with what the card shows, or an immediate undo picks the wrong direction.
+  const contextPreviews = useWorkspaceColorTagPreviewsForWorktrees(contextWorktrees)
   const contextTags = useMemo(
-    () => contextWorktrees.map((item) => item.colorTag),
-    [contextWorktrees]
+    () =>
+      contextWorktrees.map((item, index) => {
+        const preview = contextPreviews[index]
+        return preview === undefined ? item.colorTag : preview
+      }),
+    [contextPreviews, contextWorktrees]
   )
   // Why: toggle-off keys off the whole selection, so unifying a mixed selection assigns
   // rather than clears.

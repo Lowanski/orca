@@ -4,6 +4,7 @@ import {
   assignWorkspaceColorTags,
   type WorkspaceColorTagWriter
 } from './workspace-color-tag-writes'
+import { readWorkspaceColorTagPreview } from './workspace-color-tag-preview'
 
 // Why unique ids per test: the coordinator's queues are module-level on purpose (they must span
 // every menu instance), so a write one test leaves in flight would stall a later test that
@@ -159,6 +160,27 @@ describe('assignWorkspaceColorTags', () => {
       runtimeOwnerEnvironmentId: 'env-hub'
     })
     settleAll()
+  })
+
+  // Regression: a preset on a folder workspace over a paired runtime changed nothing on screen until
+  // the RPC returned, and reopening the menu computed the toggle from the stale store value.
+  it('previews the pending color on the card until its queue drains', async () => {
+    const { write, settleNext, settleAll } = deferredWriter()
+    const folder = worktree('pending::folder', 'ssh:box')
+
+    void assignWorkspaceColorTags([folder], '#111111', write, vi.fn())
+    expect(readWorkspaceColorTagPreview(folder)).toBe('#111111')
+    void assignWorkspaceColorTags([folder], null, write, vi.fn())
+    // The newest pending value is what the card shows, a previewed clear included.
+    expect(readWorkspaceColorTagPreview(folder)).toBeNull()
+
+    settleNext()
+    await flush()
+    // The first write landed but the clear is still in flight: no flash of the old store value.
+    expect(readWorkspaceColorTagPreview(folder)).toBeNull()
+    settleAll()
+    await flush()
+    expect(readWorkspaceColorTagPreview(folder)).toBeUndefined()
   })
 
   // Regression: an identity-less direct-SSH row was written with no pin at all, so the reducers

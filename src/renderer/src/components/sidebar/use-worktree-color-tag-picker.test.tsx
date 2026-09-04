@@ -5,6 +5,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Worktree } from '../../../../shared/worktree/types'
 import { useWorktreeColorTagPicker } from './use-worktree-color-tag-picker'
 import { CLOSE_ALL_CONTEXT_MENUS_EVENT } from './worktree-context-menu-policy'
+import { getWorkspaceColorTagIdentity } from '../../../../shared/workspace-color-tag'
+import {
+  clearWorkspaceColorTagPreviews,
+  createWorkspaceColorTagPreviewOwner,
+  setWorkspaceColorTagPreviews
+} from './workspace-color-tag-preview'
 
 vi.mock('./WorktreeColorTagPickerPopover', () => ({
   WorktreeColorTagPickerPopover: (props: { open: boolean }) => (
@@ -140,6 +146,21 @@ describe('workspace color tag picker handoff', () => {
   it('seeds the picker as untagged when the selection is mixed', () => {
     const { result } = render([worktree('#ef4444'), worktree('#22c55e')])
     expect(result.current.sharedColorTag).toBeNull()
+  })
+
+  // Regression: a preset write still in flight showed on the card through the preview channel, but
+  // the row read the store, so reopening the menu computed the toggle from the old value.
+  it('reads a pending preview as the shared color so the toggle matches the card', () => {
+    const owner = createWorkspaceColorTagPreviewOwner()
+    const row = worktree(null)
+    const key = getWorkspaceColorTagIdentity(row)
+    try {
+      act(() => setWorkspaceColorTagPreviews([key], '#ef4444', owner))
+      const { result } = render([row])
+      expect(result.current.sharedColorTag).toBe('#ef4444')
+    } finally {
+      act(() => clearWorkspaceColorTagPreviews([key], owner))
+    }
   })
 })
 

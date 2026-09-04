@@ -2,11 +2,8 @@ import React from 'react'
 import { LoaderCircle } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
-import {
-  getWorkspaceColorTagIdentity,
-  normalizeWorkspaceColorTag
-} from '../../../../shared/workspace-color-tag'
-import { useWorkspaceColorTagPreview } from './workspace-color-tag-preview'
+import { normalizeWorkspaceColorTag } from '../../../../shared/workspace-color-tag'
+import { useWorkspaceColorTagPreviewForWorktree } from './workspace-color-tag-preview'
 import { AutoRenameFailedDialog } from './AutoRenameFailedDialog'
 import WorktreeContextMenu from './WorktreeContextMenu'
 import { WorktreeCardParentContent } from './worktree-card-parent-content'
@@ -45,9 +42,12 @@ export function WorktreeCardSurface({ card }: { card: WorktreeCardController }):
     setShowRenameErrorDialog
   } = card
   const { titleOnlyCard, cardStyle } = presentation
-  // Why: the picker previews through a transient channel so a drag never writes metadata.
-  const previewColorTag = useWorkspaceColorTagPreview(getWorkspaceColorTagIdentity(worktree))
-  const colorTag = normalizeWorkspaceColorTag(previewColorTag ?? worktree.colorTag)
+  // Why: the picker and in-flight writes preview through a transient channel, so a drag never
+  // writes metadata and a slow write still shows on the card; a previewed clear reads as null.
+  const previewColorTag = useWorkspaceColorTagPreviewForWorktree(worktree)
+  const colorTag = normalizeWorkspaceColorTag(
+    previewColorTag === undefined ? worktree.colorTag : previewColorTag
+  )
 
   const parentCardContent = <WorktreeCardParentContent card={card} presentation={presentation} />
 

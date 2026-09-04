@@ -48,7 +48,7 @@ const IDENTITY = 'local::repo::a'
 type CommitMock = Mock<(colorTag: string | null) => Promise<void>>
 
 // Reads the preview channel the way the card does, so assertions cover the real consumer hook.
-let latestPreview: string | undefined
+let latestPreview: string | null | undefined
 function PreviewProbe(): null {
   latestPreview = useWorkspaceColorTagPreview(IDENTITY)
   return null

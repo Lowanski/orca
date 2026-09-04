@@ -147,6 +147,23 @@ describe('MetaWriteFence', () => {
     expect(onHeldListing).toHaveBeenCalledTimes(1)
   })
 
+  // Regression: the reconcile read scheduled from landing started in the same millisecond as the
+  // release, matched `fetchStartedAt <= releasedAt`, and was held as stale; with the one-shot spent,
+  // the peer's newer color never landed.
+  it('never holds a read that started at or after its own reconcile request', async () => {
+    const onHeldListing = vi.fn()
+    const { fence } = fenceAt(1000)
+    const { landed } = fence.begin('w', 'local', undefined, undefined, { onHeldListing })
+    fence.isPending('w', 'local', 900)
+    landed()
+    await Promise.resolve()
+    expect(onHeldListing).toHaveBeenCalledTimes(1)
+    expect(fence.isPending('w', 'local', 1000)).toBe(false)
+    expect(fence.isPending('w', 'local', 999)).toBe(true)
+    await Promise.resolve()
+    expect(onHeldListing).toHaveBeenCalledTimes(1)
+  })
+
   it('never reconciles for a write that held nothing, or one that failed', async () => {
     const onHeldListing = vi.fn()
     const { fence } = fenceAt(1000)

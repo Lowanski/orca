@@ -2,14 +2,62 @@
 
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
+import type { Worktree } from '../../../../shared/worktree/types'
+import { getWorkspaceColorTagFallbackIdentity } from '../../../../shared/workspace-color-tag'
 import {
   clearWorkspaceColorTagPreviews,
   createWorkspaceColorTagPreviewOwner,
   setWorkspaceColorTagPreviews,
-  useWorkspaceColorTagPreview
+  useWorkspaceColorTagPreview,
+  useWorkspaceColorTagPreviewForWorktree,
+  useWorkspaceColorTagPreviewsForWorktrees
 } from './workspace-color-tag-preview'
 
 const IDS = ['h::a', 'h::b', 'h::c']
+
+describe('workspace color tag preview readers across identity promotion', () => {
+  const owner = createWorkspaceColorTagPreviewOwner()
+  const promoted = {
+    id: 'repo::w',
+    hostId: 'ssh:box',
+    identity: { key: 'k-promo' }
+  } as unknown as Worktree
+  const identityLess = { id: 'repo::w', hostId: 'ssh:box' } as unknown as Worktree
+  const fallbackKey = getWorkspaceColorTagFallbackIdentity(promoted)
+  afterEach(() =>
+    act(() => {
+      clearWorkspaceColorTagPreviews(['k-promo', fallbackKey], owner)
+    })
+  )
+
+  // Regression: the picker previewed under the key the row had when it opened; a refresh that
+  // promoted the row mid-session re-subscribed the card under its canonical key, where nothing was
+  // written, and the strip snapped back until the write landed.
+  it('reads a preview left under the fallback key once the row has an identity', () => {
+    const { result } = renderHook(() => useWorkspaceColorTagPreviewForWorktree(promoted))
+    expect(result.current).toBeUndefined()
+    act(() => setWorkspaceColorTagPreviews([fallbackKey], '#ef4444', owner))
+    expect(result.current).toBe('#ef4444')
+  })
+
+  it('prefers the canonical key and reads a previewed clear as null, not as nothing', () => {
+    const { result } = renderHook(() => useWorkspaceColorTagPreviewForWorktree(promoted))
+    act(() => setWorkspaceColorTagPreviews([fallbackKey], '#ef4444', owner))
+    act(() => setWorkspaceColorTagPreviews(['k-promo'], null, owner))
+    expect(result.current).toBeNull()
+  })
+
+  it('reports a list of rows in order, undefined where nothing is previewed', () => {
+    const { result } = renderHook(() =>
+      useWorkspaceColorTagPreviewsForWorktrees([promoted, identityLess])
+    )
+    expect(result.current).toEqual([undefined, undefined])
+    act(() => setWorkspaceColorTagPreviews(['k-promo'], '#22c55e', owner))
+    expect(result.current).toEqual(['#22c55e', undefined])
+    act(() => setWorkspaceColorTagPreviews([fallbackKey], null, owner))
+    expect(result.current).toEqual(['#22c55e', null])
+  })
+})
 
 describe('workspace color tag preview channel', () => {
   const owner = createWorkspaceColorTagPreviewOwner()

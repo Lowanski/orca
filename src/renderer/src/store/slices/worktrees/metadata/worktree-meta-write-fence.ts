@@ -13,7 +13,8 @@ type FenceEntry = {
   /** Runs once, after the write has landed, if this fence ever held a listing back. */
   onHeldListing?: () => void
   held: boolean
-  reconciled: boolean
+  /** When the one-shot refresh was requested; a read that started at or after it is never held. */
+  reconcileAt: number | null
   /** Null while the write is in flight; the settle time once it has landed. */
   releasedAt: number | null
 }
@@ -64,7 +65,7 @@ export class MetaWriteFence {
       written: options?.written,
       onHeldListing: options?.onHeldListing,
       held: false,
-      reconciled: false,
+      reconcileAt: null,
       releasedAt: null
     }
     this.entries.add(entry)
@@ -72,7 +73,7 @@ export class MetaWriteFence {
       landed: () => {
         entry.releasedAt = this.now()
         if (entry.held) {
-          reconcile(entry)
+          this.requestReconcile(entry)
         }
       },
       failed: () => {
@@ -103,15 +104,46 @@ export class MetaWriteFence {
       if (incoming !== undefined && entry.written !== undefined && incoming === entry.written) {
         continue
       }
+      // Why: the refresh this entry asked for after landing is the authoritative read that settles
+      // it, and it can start in the same millisecond as the release. Nothing that started at or
+      // after that request is stale with respect to this write.
+      if (
+        entry.reconcileAt !== null &&
+        fetchStartedAt !== undefined &&
+        fetchStartedAt >= entry.reconcileAt
+      ) {
+        continue
+      }
       if (
         entry.releasedAt === null ||
         (fetchStartedAt !== undefined && fetchStartedAt <= entry.releasedAt)
       ) {
-        hold(entry)
+        this.hold(entry)
         return true
       }
     }
     return false
+  }
+
+  // Why reconcile: a listing that started before the write landed can still carry a *newer*
+  // authoritative value (a peer changed the tag after this write reached the host), and the fence
+  // cannot tell that from a stale listing. Holding it is the safe default; one refresh after landing
+  // lets the host settle the question, so the notification the peer's change produced is not lost.
+  private hold(entry: FenceEntry): void {
+    entry.held = true
+    if (entry.releasedAt !== null) {
+      this.requestReconcile(entry)
+    }
+  }
+
+  // Why deferred: the merge that asks the fence runs inside a store reducer; the refresh must start
+  // after that reducer has returned.
+  private requestReconcile(entry: FenceEntry): void {
+    if (entry.reconcileAt !== null || !entry.onHeldListing) {
+      return
+    }
+    entry.reconcileAt = this.now()
+    queueMicrotask(entry.onHeldListing)
   }
 
   private prune(): void {
@@ -122,27 +154,6 @@ export class MetaWriteFence {
       }
     }
   }
-}
-
-// Why reconcile: a listing that started before the write landed can still carry a *newer*
-// authoritative value (a peer changed the tag after this write reached the host), and the fence
-// cannot tell that from a stale listing. Holding it is the safe default; one refresh after landing
-// lets the host settle the question, so the notification the peer's change produced is not lost.
-function hold(entry: FenceEntry): void {
-  entry.held = true
-  if (entry.releasedAt !== null) {
-    reconcile(entry)
-  }
-}
-
-// Why deferred: the merge that asks the fence runs inside a store reducer; the refresh must start
-// after that reducer has returned.
-function reconcile(entry: FenceEntry): void {
-  if (entry.reconciled || !entry.onHeldListing) {
-    return
-  }
-  entry.reconciled = true
-  queueMicrotask(entry.onHeldListing)
 }
 
 // Why identity wins when both sides have one, and is compared before the id: two HUBs can publish

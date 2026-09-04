@@ -1,6 +1,14 @@
 import type { ExecutionHostId } from '../../../../shared/execution-host'
 import type { Worktree } from '../../../../shared/worktree/types'
-import { getWorkspaceColorTagIdentity } from '../../../../shared/workspace-color-tag'
+import {
+  getWorkspaceColorTagFallbackIdentity,
+  getWorkspaceColorTagIdentity
+} from '../../../../shared/workspace-color-tag'
+import {
+  clearWorkspaceColorTagPreviews,
+  createWorkspaceColorTagPreviewOwner,
+  setWorkspaceColorTagPreviews
+} from './workspace-color-tag-preview'
 
 type WorktreeMetaWriteResult = { ok: true } | { ok: false; error: string }
 
@@ -28,7 +36,16 @@ type IdentityQueue = {
   pending: PendingWrite | undefined
   /** The canonical identity this queue serves, once a row carrying one has joined it. */
   canonical: string | undefined
+  /** Every key this queue has previewed under; cleared together once the queue drains. */
+  previewIdentities: Set<string>
 }
+
+// Why preview from here: a folder workspace on a paired runtime has no optimistic store apply and
+// can wait the full RPC timeout, so the card would show the old strip with no feedback. The pending
+// color goes through the same channel the picker uses, and the menu row reads it too, so the toggle
+// matches what the card shows. Cleared only once the queue drains, so a superseded color never
+// flashes the old value between writes.
+const PENDING_WRITE_PREVIEW_OWNER = createWorkspaceColorTagPreviewOwner()
 
 /**
  * Color-tag write ordering, shared by every context-menu instance.
@@ -72,6 +89,9 @@ function enqueue(
   onError: (message: string) => void
 ): Promise<void> {
   const current = queueFor(worktree)
+  const previewIdentity = getWorkspaceColorTagIdentity(worktree)
+  current.previewIdentities.add(previewIdentity)
+  setWorkspaceColorTagPreviews([previewIdentity], colorTag, PENDING_WRITE_PREVIEW_OWNER)
   return new Promise<void>((resolve) => {
     // Latest wins: a newer value replaces an older pending one, and the older assignment's waiters
     // settle when the newer write lands — any later state satisfies them.
@@ -103,16 +123,19 @@ function queueFor(worktree: Worktree): IdentityQueue {
   }
   const canonical = worktree.identity?.key
   const fallback =
-    canonical === undefined
-      ? identity
-      : getWorkspaceColorTagIdentity({ ...worktree, identity: undefined })
+    canonical === undefined ? identity : getWorkspaceColorTagFallbackIdentity(worktree)
   const byFallback = queues.get(fallback)
   if (canonical !== undefined && byFallback && byFallback.canonical === undefined) {
     byFallback.canonical = canonical
     queues.set(identity, byFallback)
     return byFallback
   }
-  const queue: IdentityQueue = { inFlight: false, pending: undefined, canonical }
+  const queue: IdentityQueue = {
+    inFlight: false,
+    pending: undefined,
+    canonical,
+    previewIdentities: new Set()
+  }
   queues.set(identity, queue)
   if (!queues.has(fallback)) {
     queues.set(fallback, queue)
@@ -125,6 +148,8 @@ function drain(queue: IdentityQueue, write: WorkspaceColorTagWriter): void {
   queue.pending = undefined
   if (!next) {
     queue.inFlight = false
+    clearWorkspaceColorTagPreviews([...queue.previewIdentities], PENDING_WRITE_PREVIEW_OWNER)
+    queue.previewIdentities.clear()
     for (const [key, registered] of queues) {
       if (registered === queue) {
         queues.delete(key)
