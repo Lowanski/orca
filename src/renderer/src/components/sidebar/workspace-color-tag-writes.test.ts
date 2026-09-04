@@ -105,6 +105,8 @@ describe('assignWorkspaceColorTags', () => {
     } as unknown as Worktree
     void assignWorkspaceColorTags([viaRuntimeA, viaRuntimeB], '#111111', write, vi.fn())
     expect(write).toHaveBeenCalledTimes(2)
+    // Why: keying the queue by identity is not enough — the write itself must pin that row.
+    expect(write.mock.calls.map((call) => call[2]?.identityKey).sort()).toEqual(['k-a', 'k-b'])
     settleAll()
   })
 

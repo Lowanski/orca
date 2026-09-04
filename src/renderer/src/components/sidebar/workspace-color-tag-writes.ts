@@ -8,7 +8,7 @@ type WorktreeMetaWriteResult = { ok: true } | { ok: false; error: string }
 export type WorkspaceColorTagWriter = (
   worktreeId: string,
   updates: { colorTag: string | null },
-  options?: { executionHostId?: ExecutionHostId }
+  options?: { executionHostId?: ExecutionHostId; identityKey?: string }
 ) => Promise<WorktreeMetaWriteResult>
 
 type PendingWrite = {
@@ -93,10 +93,11 @@ function drain(identity: string, queue: IdentityQueue, write: WorkspaceColorTagW
     return
   }
   queue.inFlight = true
+  // Why the identity: the queue is keyed by it, so the write must land on that exact row too.
   write(
     next.worktree.id,
     { colorTag: next.colorTag },
-    { executionHostId: next.worktree.hostId ?? 'local' }
+    { executionHostId: next.worktree.hostId ?? 'local', identityKey: next.worktree.identity?.key }
   )
     .then(
       (result) => {

@@ -9,7 +9,7 @@ vi.mock('../metadata/worktree-meta-persist', () => ({
   isDisplayNamePersistencePending: () => false
 }))
 
-import { preserveConcurrentColorTag } from './fetched-worktree-merge'
+import { preserveConcurrentColorTag } from './fetched-worktree-color-tag-fence'
 
 function worktree(id: string, colorTag: string | null): Worktree {
   return { id, hostId: 'local', colorTag } as unknown as Worktree

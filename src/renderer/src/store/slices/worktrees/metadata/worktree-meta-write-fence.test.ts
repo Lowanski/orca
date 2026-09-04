@@ -19,25 +19,36 @@ describe('MetaWriteFence', () => {
   // assignment but joined an older listing merge its stale answer once the write was done.
   it('stays armed after release for a fetch that started before the write landed', () => {
     const { fence, advanceTo } = fenceAt(1000)
-    const release = fence.begin('w', 'local')
+    const { landed } = fence.begin('w', 'local')
     advanceTo(2000)
-    release()
+    landed()
     expect(fence.isPending('w', 'local', 1500)).toBe(true)
     expect(fence.isPending('w', 'local', 2000)).toBe(true)
   })
 
   it('stands down for a fetch that started after the write landed', () => {
     const { fence, advanceTo } = fenceAt(1000)
-    const release = fence.begin('w', 'local')
+    const { landed } = fence.begin('w', 'local')
     advanceTo(2000)
-    release()
+    landed()
     expect(fence.isPending('w', 'local', 2001)).toBe(false)
   })
 
   it('is not pending after release for a caller with no listing context', () => {
     const { fence } = fenceAt(1000)
-    fence.begin('w', 'local')()
+    fence.begin('w', 'local').landed()
     expect(fence.isPending('w', 'local')).toBe(false)
+  })
+
+  // Regression: a rejected write was recorded as landed, so the recovery fetch that follows a
+  // failure — starting within the same millisecond — was fenced out and the failed optimistic
+  // color stayed on the card with no later refresh to revert it.
+  it('drops a failed write so the recovery fetch can revert the optimistic value', () => {
+    const { fence } = fenceAt(1000)
+    fence.begin('w', 'local').failed()
+    expect(fence.isPending('w', 'local')).toBe(false)
+    expect(fence.isPending('w', 'local', 1000)).toBe(false)
+    expect(fence.isPending('w', 'local', 0)).toBe(false)
   })
 
   it('matches a host-agnostic query against a host-scoped entry and vice versa', () => {
@@ -50,7 +61,7 @@ describe('MetaWriteFence', () => {
 
   it('forgets released entries once no live listing could still merge', () => {
     const { fence, advanceTo } = fenceAt(1000)
-    fence.begin('w', 'local')()
+    fence.begin('w', 'local').landed()
     advanceTo(1000 + 30_000 + 1)
     expect(fence.isPending('w', 'local', 0)).toBe(false)
   })

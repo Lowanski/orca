@@ -1,4 +1,5 @@
 import type { AppState } from '../../../types'
+import { getRepoIdFromWorktreeId } from '../../../../../../shared/worktree/id'
 import type { FolderWorkspace } from '../../../../../../shared/folder-workspace-types'
 import type { WorktreeMeta } from '../../../../../../shared/worktree/meta-types'
 import type { DetectedWorktreeListResult, Worktree } from '../../../../../../shared/worktree/types'
@@ -26,7 +27,8 @@ export function applyDetectedWorktreeUpdates(
   detectedWorktreesByRepo: AppState['detectedWorktreesByRepo'],
   worktreeId: string,
   rawUpdates: Partial<WorktreeMeta>,
-  executionHostId?: ExecutionHostId
+  executionHostId?: ExecutionHostId,
+  identityKey?: string
 ): AppState['detectedWorktreesByRepo'] {
   // Why: mirrors applyWorktreeUpdates — detected rows feed the same palette.
   const updates = withoutErasedRequiredWorktreeFields(rawUpdates)
@@ -36,7 +38,11 @@ export function applyDetectedWorktreeUpdates(
   for (const [repoId, result] of Object.entries(detectedWorktreesByRepo)) {
     let repoChanged = false
     const nextWorktrees = result.worktrees.map((worktree) => {
-      if (worktree.id !== worktreeId || !worktreeRowMatchesMetaHost(worktree, executionHostId)) {
+      if (
+        worktree.id !== worktreeId ||
+        !worktreeRowMatchesMetaHost(worktree, executionHostId) ||
+        (identityKey !== undefined && worktree.identity?.key !== identityKey)
+      ) {
         return worktree
       }
       repoChanged = true
@@ -67,6 +73,33 @@ export function folderWorkspaceMatchesHost(
         ? toSshExecutionHostId(workspace.connectionId)
         : LOCAL_EXECUTION_HOST_ID)) === executionHostId
   )
+}
+
+/**
+ * The one row for a worktree whose canonical identity matches, or undefined without a key. Two
+ * paired runtimes can publish one checkout as two rows sharing id and host; this is how a caller
+ * that knows the exact row asks for it.
+ */
+export function findKnownWorktreeByIdentityKey(
+  state: Pick<AppState, 'worktreesByRepo' | 'detectedWorktreesByRepo'>,
+  worktreeId: string,
+  identityKey: string | undefined
+): Worktree | DetectedWorktreeListResult['worktrees'][number] | undefined {
+  if (identityKey === undefined) {
+    return undefined
+  }
+  const visible = state.worktreesByRepo[getRepoIdFromWorktreeId(worktreeId)]?.find(
+    (worktree) => worktree.id === worktreeId && worktree.identity?.key === identityKey
+  )
+  if (visible) {
+    return visible
+  }
+  return (
+    findIndexedDetectedWorktrees(
+      state.detectedWorktreesByRepo,
+      worktreeId
+    ) as DetectedWorktreeListResult['worktrees']
+  ).find((worktree) => worktree.identity?.key === identityKey)
 }
 
 export function findKnownWorktreeById(

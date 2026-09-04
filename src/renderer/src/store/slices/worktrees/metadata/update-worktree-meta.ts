@@ -10,7 +10,7 @@ import { getGitHubPRCacheKey, getLegacyGitHubPRCacheKey } from '../../github-cac
 import {
   applyDetectedWorktreeUpdates,
   findKnownWorktreeById,
-  getFolderWorkspaceMetaUpdates
+  findKnownWorktreeByIdentityKey
 } from '../listing/detected-worktree-meta'
 import {
   bumpHostedReviewLinkMutationGeneration,
@@ -24,6 +24,7 @@ import {
   resolveGitHubReviewPushTarget
 } from './hosted-review-push-target'
 import { persistWorktreeMeta } from './worktree-meta-persist'
+import { updateFolderWorkspaceMeta } from './update-folder-workspace-meta'
 import { isRuntimeSelectorNotFoundError } from '../listing/runtime-worktree-rpc-errors'
 import {
   settingsForWorktreeOwner,
@@ -38,7 +39,12 @@ export function createUpdateWorktreeMeta(
   return async (worktreeId, updates, options) => {
     const shouldApplyUpdate = options?.shouldApply
     const requestedHostId = options?.executionHostId
-    const existingWorktree = findKnownWorktreeById(get(), worktreeId, requestedHostId)
+    // Why: two paired runtimes can publish one checkout as two rows with the same id and host; a
+    // caller that knows the exact row pins it so lookup, optimistic apply, and persistence agree.
+    const requestedIdentityKey = options?.identityKey
+    const existingWorktree =
+      findKnownWorktreeByIdentityKey(get(), worktreeId, requestedIdentityKey) ??
+      findKnownWorktreeById(get(), worktreeId, requestedHostId)
     const executionHostId =
       requestedHostId ??
       existingWorktree?.hostId ??
@@ -48,33 +54,12 @@ export function createUpdateWorktreeMeta(
     }
     const workspaceScope = parseWorkspaceKey(worktreeId)
     if (workspaceScope?.type === 'folder') {
-      const folderUpdates = getFolderWorkspaceMetaUpdates(updates)
-      if (Object.keys(folderUpdates).length === 0) {
-        return { ok: true }
-      }
-      try {
-        // Why: a rejected folder update reconciles the optimistic write away, so
-        // reporting ok would show the dialog a save that silently undid itself.
-        // Why: a folder id can exist on several hosts; without the host the write can land on the
-        // active host instead of the selected one.
-        const updated = await get().updateFolderWorkspace(
-          workspaceScope.folderWorkspaceId,
-          folderUpdates,
-          executionHostId ? { executionHostId } : undefined
-        )
-        return updated
-          ? { ok: true }
-          : {
-              ok: false,
-              error: translate(
-                'auto.store.slices.worktrees.a17f4d2e93',
-                'Could not update this workspace.'
-              )
-            }
-      } catch (err) {
-        console.error('Failed to update folder workspace meta:', err)
-        return { ok: false, error: err instanceof Error ? err.message : String(err) }
-      }
+      return updateFolderWorkspaceMeta(
+        get,
+        workspaceScope.folderWorkspaceId,
+        updates,
+        executionHostId
+      )
     }
     const normalizedUpdates = normalizeHostedReviewLinkReplacementUpdates(updates, existingWorktree)
     // Why: manual PR linking supplies only the number; resolve the head branch so Push targets the review branch.
@@ -110,7 +95,9 @@ export function createUpdateWorktreeMeta(
       resolvedPushTarget === undefined &&
       existingHostedReviewPushTargetLookup !== null &&
       existingHostedReviewPushTargetLookup.key !== nextHostedReviewPushTargetLookup?.key
-    const worktreeForUpdate = get().getKnownWorktreeById(worktreeId, executionHostId)
+    const worktreeForUpdate =
+      findKnownWorktreeByIdentityKey(get(), worktreeId, requestedIdentityKey) ??
+      get().getKnownWorktreeById(worktreeId, executionHostId)
     if (shouldApplyUpdate && !shouldApplyUpdate(worktreeForUpdate)) {
       return { ok: true }
     }
@@ -159,13 +146,15 @@ export function createUpdateWorktreeMeta(
         s.worktreesByRepo,
         worktreeId,
         enriched,
-        executionHostId
+        executionHostId,
+        requestedIdentityKey
       )
       const nextDetectedWorktrees = applyDetectedWorktreeUpdates(
         s.detectedWorktreesByRepo,
         worktreeId,
         enriched,
-        executionHostId
+        executionHostId,
+        requestedIdentityKey
       )
       const cacheKey =
         reviewRepo && reviewBranch
@@ -254,7 +243,7 @@ export function createUpdateWorktreeMeta(
         worktreeId,
         enriched,
         executionHostId ?? existingWorktree?.hostId,
-        worktreeForUpdate?.identity?.key
+        requestedIdentityKey ?? worktreeForUpdate?.identity?.key
       )
       if (
         !options?.suppressHostedReviewRefresh &&

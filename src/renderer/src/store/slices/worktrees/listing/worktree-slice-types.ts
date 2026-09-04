@@ -34,6 +34,8 @@ export type DetectedWorktreeRefreshOptions = BackgroundRuntimeRefreshOptions & {
 export type AdmittedDetectedWorktreeRefresh = {
   status: 'admitted'
   result: DetectedWorktreeListResult
+  /** When the underlying scan began — earlier than a joining caller's own start. */
+  startedAt?: number
   providerResult?: HostQualifiedDetectedWorktreeResult
   executionHostId: ExecutionHostId
   directSshAuthority?: DirectSshAuthority

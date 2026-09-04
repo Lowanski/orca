@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Worktree } from '../../../../../../shared/worktree/types'
-import { preserveConcurrentColorTag } from './fetched-worktree-merge'
+import { preserveConcurrentColorTag } from './fetched-worktree-color-tag-fence'
 
 function worktree(id: string, colorTag: string | null | undefined): Worktree {
   return { id, hostId: 'local', colorTag } as unknown as Worktree

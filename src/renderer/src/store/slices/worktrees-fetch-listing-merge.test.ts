@@ -336,6 +336,66 @@ describe('fetchWorktrees', () => {
     expect(store.getState().worktreesByRepo.repo1[0]?.head).toBe('def456')
   })
 
+  // Regression: a fetch that joined an already-running scan stamped its own, later start time, so
+  // a color that landed between the scan's start and the join looked older than the fence and the
+  // pre-write scan result undid it.
+  it('fences a color write against a fetch that joined a scan started before the write', async () => {
+    const store = createTestStore()
+    const daily = makeWorktree({
+      id: 'repo1::/path/daily',
+      repoId: 'repo1',
+      path: '/path/daily',
+      colorTag: null
+    })
+    const detected = makeDetectedResult('repo1', [daily])
+    let resolveListing!: (worktrees: Worktree[]) => void
+    const listing = new Promise<Worktree[]>((resolve) => {
+      resolveListing = resolve
+    })
+    worktreeListMock.mockReturnValue(listing)
+    store.setState({
+      worktreesByRepo: { repo1: [daily] },
+      detectedWorktreesByRepo: { repo1: detected }
+    } as Partial<AppState>)
+
+    const first = store.getState().fetchWorktrees('repo1')
+    await vi.waitFor(() => expect(worktreeListMock).toHaveBeenCalledTimes(1))
+    await store.getState().updateWorktreeMeta(daily.id, { colorTag: '#ef4444' })
+    // Joins the scan the first fetch started; its own start is after the write landed.
+    const second = store.getState().fetchWorktrees('repo1')
+    resolveListing([{ ...daily, head: 'def456' }])
+    await Promise.all([first, second])
+
+    expect(worktreeListMock).toHaveBeenCalledTimes(1)
+    expect(store.getState().worktreesByRepo.repo1[0]?.colorTag).toBe('#ef4444')
+    expect(store.getState().worktreesByRepo.repo1[0]?.head).toBe('def456')
+    worktreeListMock.mockReset()
+  })
+
+  // Regression: two paired runtimes can publish one checkout as two rows with the same id and
+  // host; an update addressed by id and host recolored both.
+  it('pins a metadata update to the row whose identity key was given', async () => {
+    const store = createTestStore()
+    const viaA = makeWorktree({
+      id: 'repo1::/path/shared',
+      repoId: 'repo1',
+      path: '/path/shared',
+      identity: { key: 'k-a' } as never,
+      colorTag: null
+    })
+    const viaB = { ...viaA, identity: { key: 'k-b' } as never }
+    store.setState({ worktreesByRepo: { repo1: [viaA, viaB] } } as Partial<AppState>)
+
+    await store
+      .getState()
+      .updateWorktreeMeta(viaA.id, { colorTag: '#ef4444' }, { identityKey: 'k-a' })
+
+    expect(store.getState().worktreesByRepo.repo1.map((worktree) => worktree.colorTag)).toEqual([
+      '#ef4444',
+      null
+    ])
+  })
+
   it('does not merge a stale display name over a rename completed during refresh', async () => {
     const store = createTestStore()
     const worktreeId = 'repo1::/path/wt1'

@@ -86,24 +86,37 @@ export function persistWorktreeMeta(
     executionHostId,
     identityKey
   )
-  const releases: (() => void)[] = []
+  const onLanded: (() => void)[] = []
+  const onFailed: (() => void)[] = []
   if ('displayName' in updates) {
     const write: PendingMetaWrite = { worktreeId, executionHostId }
     pendingDisplayNameWrites.add(write)
-    releases.push(() => pendingDisplayNameWrites.delete(write))
+    const drop = (): void => {
+      pendingDisplayNameWrites.delete(write)
+    }
+    onLanded.push(drop)
+    onFailed.push(drop)
   }
   if ('colorTag' in updates) {
-    releases.push(colorTagWriteFence.begin(worktreeId, executionHostId))
+    const fence = colorTagWriteFence.begin(worktreeId, executionHostId)
+    onLanded.push(fence.landed)
+    onFailed.push(fence.failed)
   }
-  if (releases.length === 0) {
+  if (onLanded.length === 0) {
     return operation
   }
-  const release = (): void => {
-    for (const fn of releases) {
-      fn()
+  void operation.then(
+    () => {
+      for (const fn of onLanded) {
+        fn()
+      }
+    },
+    () => {
+      for (const fn of onFailed) {
+        fn()
+      }
     }
-  }
-  void operation.then(release, release)
+  )
   return operation
 }
 

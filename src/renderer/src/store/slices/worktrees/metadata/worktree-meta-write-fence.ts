@@ -25,13 +25,25 @@ export class MetaWriteFence {
 
   constructor(private readonly now: () => number = () => Date.now()) {}
 
-  /** Marks a write in flight; call the returned function once it has settled either way. */
-  begin(worktreeId: string, executionHostId?: ExecutionHostId): () => void {
+  /**
+   * Marks a write in flight. Call `landed` once the host has it, or `failed` if it never got
+   * there: a failed write is dropped outright, because the recovery fetch that follows a failure
+   * must be free to revert the optimistic value it would otherwise be fenced out of.
+   */
+  begin(
+    worktreeId: string,
+    executionHostId?: ExecutionHostId
+  ): { landed: () => void; failed: () => void } {
     this.prune()
     const entry: FenceEntry = { worktreeId, executionHostId, releasedAt: null }
     this.entries.add(entry)
-    return () => {
-      entry.releasedAt = this.now()
+    return {
+      landed: () => {
+        entry.releasedAt = this.now()
+      },
+      failed: () => {
+        this.entries.delete(entry)
+      }
     }
   }
 

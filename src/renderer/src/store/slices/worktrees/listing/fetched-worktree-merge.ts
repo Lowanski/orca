@@ -19,10 +19,8 @@ import {
 } from '../metadata/hosted-review-link-mutation'
 import { isCurrentDetectedWorktreeRefresh } from './detected-worktree-refresh-admission'
 import { buildWorktreePurgeState } from '../teardown/worktree-purge-state'
-import {
-  isColorTagPersistencePending,
-  isDisplayNamePersistencePending
-} from '../metadata/worktree-meta-persist'
+import { isDisplayNamePersistencePending } from '../metadata/worktree-meta-persist'
+import { fenceStartedAt, preserveConcurrentColorTag } from './fetched-worktree-color-tag-fence'
 import { branchName } from '@/lib/git-utils'
 import {
   forgetAuthoritativelyRemovedWorktrees,
@@ -54,42 +52,6 @@ export function preserveConcurrentManualOrder<T extends Worktree>(
     }
     // Why: a refresh response may predate a completed drag; the renderer's optimistic rank is newer.
     return { ...worktree, manualOrder: latest.manualOrder }
-  })
-}
-
-export function preserveConcurrentColorTag<T extends Worktree>(
-  incoming: readonly T[],
-  requestStarted: readonly Worktree[] | undefined,
-  current: readonly Worktree[] | undefined,
-  matchesRefreshHost: (worktree: Worktree) => boolean,
-  requestStartedAt?: number
-): T[] {
-  if (!requestStarted || !current) {
-    return [...incoming]
-  }
-  const startedById = new Map(
-    requestStarted.filter(matchesRefreshHost).map((worktree) => [worktree.id, worktree])
-  )
-  const currentById = new Map(
-    current.filter(matchesRefreshHost).map((worktree) => [worktree.id, worktree])
-  )
-  return incoming.map((worktree) => {
-    const started = startedById.get(worktree.id)
-    const latest = currentById.get(worktree.id)
-    if (!started || !latest) {
-      return worktree
-    }
-    // Why the pending guard: a fetch that started after the assignment but joined a listing
-    // captured before it sees started and latest already equal to the new color, so only the
-    // in-flight write tells the stale answer apart. Color writes emit no local invalidation, so
-    // without this the old tag would stick until an unrelated refresh.
-    if (
-      isColorTagPersistencePending(worktree.id, latest.hostId, requestStartedAt) ||
-      (started.colorTag ?? null) !== (latest.colorTag ?? null)
-    ) {
-      return { ...worktree, colorTag: latest.colorTag ?? null }
-    }
-    return worktree
   })
 }
 
@@ -202,7 +164,7 @@ export function mergeFetchedWorktrees(
           args.requestStartedWorktrees,
           currentWorktrees,
           (worktree) => worktreeMatchesHost(worktree, args.hostId, matchOptions),
-          args.requestStartedAt
+          fenceStartedAt(args)
         ),
         args.requestStartedWorktrees,
         currentWorktrees,

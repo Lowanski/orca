@@ -30,6 +30,7 @@ import {
   startDetectedWorktreeProviderRequest
 } from './detected-worktree-provider-request'
 
+const runtimeDetectedWorktreeRefreshStartedAt = new Map<string, number>()
 const runtimeDetectedWorktreeRefreshesInFlight = new Map<
   string,
   Promise<DetectedWorktreeListResult>
@@ -151,7 +152,11 @@ export async function listDetectedWorktreesForRepoCoalesced(
         reuseRecentCompatibilityFailure: options.reuseRecentCompatibilityFailure
       })
       runtimeDetectedWorktreeRefreshesInFlight.set(key, refresh)
+      runtimeDetectedWorktreeRefreshStartedAt.set(key, Date.now())
     }
+    // Why: a joining caller started later than the scan it shares; the merge fences on the
+    // scan's start, or a write that landed between the two would be undone by pre-write data.
+    const startedAt = runtimeDetectedWorktreeRefreshStartedAt.get(key)
     try {
       const result = await refresh
       if (
@@ -174,6 +179,7 @@ export async function listDetectedWorktreesForRepoCoalesced(
       return {
         status: 'admitted',
         result,
+        startedAt,
         executionHostId: options.executionHostId,
         runtimeAuthority: {
           environmentId: target.environmentId,
@@ -184,11 +190,13 @@ export async function listDetectedWorktreesForRepoCoalesced(
     } finally {
       if (runtimeDetectedWorktreeRefreshesInFlight.get(key) === refresh) {
         runtimeDetectedWorktreeRefreshesInFlight.delete(key)
+        runtimeDetectedWorktreeRefreshStartedAt.delete(key)
       }
     }
   }
 
   const lease = acquireDetectedWorktreeRefreshLeaseForRepo(settings, repoId, options)
+  const startedAt = rememberLeaseStart(lease.providerRequestId)
   let providerResult: HostQualifiedDetectedWorktreeResult
   try {
     providerResult = await lease.result
@@ -228,8 +236,30 @@ export async function listDetectedWorktreesForRepoCoalesced(
   return {
     status: 'admitted',
     result: providerResult.result,
+    startedAt,
     providerResult,
     executionHostId: options.executionHostId,
     directSshAuthority: options.directSshAuthority
   }
+}
+
+// Why keyed by provider request: the lease registry hands every joiner the same request id, so
+// the first acquire's clock is the scan's start for all of them. Entries older than any listing
+// could still be are dropped on the way in.
+const LEASE_START_TTL_MS = 60_000
+const leaseStartedAtByRequestId = new Map<string, number>()
+
+function rememberLeaseStart(providerRequestId: string): number {
+  const now = Date.now()
+  for (const [id, at] of leaseStartedAtByRequestId) {
+    if (now - at > LEASE_START_TTL_MS) {
+      leaseStartedAtByRequestId.delete(id)
+    }
+  }
+  const existing = leaseStartedAtByRequestId.get(providerRequestId)
+  if (existing !== undefined) {
+    return existing
+  }
+  leaseStartedAtByRequestId.set(providerRequestId, now)
+  return now
 }
