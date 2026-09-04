@@ -107,7 +107,8 @@ export default function WorktreeContextMenuView({ model }: { model: WorktreeCont
   const colorTagPicker = useWorktreeColorTagPicker(
     effectiveSelectedWorktrees,
     menuPoint,
-    handleAssignColorTag
+    handleAssignColorTag,
+    handleCloseAutoFocus
   )
   return (
     <div
@@ -159,7 +160,7 @@ export default function WorktreeContextMenuView({ model }: { model: WorktreeCont
           }}
           onMouseUpCapture={suppressOpeningPointerEvent}
           onClickCapture={suppressOpeningPointerEvent}
-          onCloseAutoFocus={handleCloseAutoFocus}
+          onCloseAutoFocus={colorTagPicker.handleMenuCloseAutoFocus}
         >
           <DropdownMenuLabel className="px-2 py-1 text-[11px] font-medium text-muted-foreground">
             {translate('auto.components.sidebar.WorktreeContextMenu.workspaceSection', 'Workspace')}
