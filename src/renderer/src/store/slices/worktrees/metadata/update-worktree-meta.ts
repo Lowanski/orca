@@ -15,12 +15,12 @@ import {
 } from '../listing/detected-worktree-meta'
 import {
   bumpHostedReviewLinkMutationGeneration,
-  getHostedReviewLinkForMetaRefresh,
   hasChangedHostedReviewLinkUpdates,
   hasHostedReviewLinkUpdates
 } from './hosted-review-link-mutation'
 import { normalizeHostedReviewLinkReplacementUpdates } from './hosted-review-link-update-normalization'
 import { persistWorktreeMeta } from './worktree-meta-persist'
+import { refreshHostedReviewAfterMetaUpdate } from './hosted-review-refresh-after-meta-update'
 import { resolveHostedReviewPushTargetUpdate } from './hosted-review-push-target-resolution'
 import { updateFolderWorkspaceMeta } from './update-folder-workspace-meta'
 import { isRuntimeSelectorNotFoundError } from '../listing/runtime-worktree-rpc-errors'
@@ -44,14 +44,15 @@ export function createUpdateWorktreeMeta(
     // Why not fall back: the locator is mutable — the row may be gone or its path reused — and local
     // persistence carries no identity, so a fallback would stamp the value on whatever occupies the
     // path now, or recreate metadata for a deleted workspace.
+    const identityGone = () => ({
+      ok: false as const,
+      error: translate(
+        'auto.store.slices.worktrees.metadata.update.worktree.meta.identityGone',
+        'This workspace is no longer available.'
+      )
+    })
     if (requestedIdentityKey !== undefined && !identityMatch) {
-      return {
-        ok: false,
-        error: translate(
-          'auto.store.slices.worktrees.metadata.update.worktree.meta.identityGone',
-          'This workspace is no longer available.'
-        )
-      }
+      return identityGone()
     }
     const existingWorktree =
       identityMatch ?? findKnownWorktreeById(get(), worktreeId, requestedHostId)
@@ -80,8 +81,14 @@ export function createUpdateWorktreeMeta(
         existingWorktree,
         normalizedUpdates
       )
-    const worktreeForUpdate =
-      identityMatch ?? get().getKnownWorktreeById(worktreeId, executionHostId)
+    // Why re-resolve: the preflight above yields, and catalog reconciliation can remove or replace
+    // the pinned row meanwhile. Reusing the earlier match would let the identity-filtered reducers
+    // update nothing while persistence still wrote through the mutable locator.
+    const pinnedNow = findKnownWorktreeByIdentityKey(get(), worktreeId, requestedIdentityKey)
+    if (requestedIdentityKey !== undefined && !pinnedNow) {
+      return identityGone()
+    }
+    const worktreeForUpdate = pinnedNow ?? get().getKnownWorktreeById(worktreeId, executionHostId)
     if (shouldApplyUpdate && !shouldApplyUpdate(worktreeForUpdate)) {
       return { ok: true }
     }
@@ -232,6 +239,35 @@ export function createUpdateWorktreeMeta(
     const recoveryFetchOptions = pinnedOwnerEnvironmentId
       ? { executionHostId: toRuntimeExecutionHostId(pinnedOwnerEnvironmentId) }
       : undefined
+    // Why await and roll back: a write that failed because its host is away usually cannot refresh
+    // either, and fetchWorktrees then just returns false. Left alone, the optimistic color would
+    // stay on the card after the picker has already reported the failure. Scoped to colorTag: it
+    // is the field this path exists for, and other fields keep their existing semantics.
+    const priorColorTag = existingWorktree?.colorTag ?? null
+    const recoverAfterFailedPersist = async (): Promise<void> => {
+      const refreshed = await get()
+        .fetchWorktrees(getRepoIdFromWorktreeId(worktreeId), recoveryFetchOptions)
+        .catch(() => false)
+      if (refreshed || !('colorTag' in enriched)) {
+        return
+      }
+      set((s) => ({
+        worktreesByRepo: applyWorktreeUpdates(
+          s.worktreesByRepo,
+          worktreeId,
+          { colorTag: priorColorTag },
+          executionHostId,
+          requestedIdentityKey
+        ),
+        detectedWorktreesByRepo: applyDetectedWorktreeUpdates(
+          s.detectedWorktreesByRepo,
+          worktreeId,
+          { colorTag: priorColorTag },
+          executionHostId,
+          requestedIdentityKey
+        )
+      }))
+    }
     try {
       await persistWorktreeMeta(
         pinnedOwnerEnvironmentId
@@ -242,47 +278,17 @@ export function createUpdateWorktreeMeta(
         executionHostId ?? existingWorktree?.hostId,
         requestedIdentityKey ?? worktreeForUpdate?.identity?.key
       )
-      if (
-        !options?.suppressHostedReviewRefresh &&
-        reviewRepo &&
-        reviewBranch &&
-        typeof get().fetchHostedReviewForBranch === 'function'
-      ) {
-        // Why: refetch against post-update links so a cache entry from the previous provider link can't keep showing the removed review.
-        void get().fetchHostedReviewForBranch(reviewRepo.path, reviewBranch, {
-          repoId: reviewRepo.id,
-          repoOwnerExecutionHostId: executionHostId ?? worktreeForUpdate?.hostId,
-          linkedGitHubPR: getHostedReviewLinkForMetaRefresh(
-            targetEnriched,
-            worktreeForUpdate,
-            'linkedPR'
-          ),
-          linkedGitLabMR: getHostedReviewLinkForMetaRefresh(
-            targetEnriched,
-            worktreeForUpdate,
-            'linkedGitLabMR'
-          ),
-          linkedBitbucketPR: getHostedReviewLinkForMetaRefresh(
-            targetEnriched,
-            worktreeForUpdate,
-            'linkedBitbucketPR'
-          ),
-          linkedAzureDevOpsPR: getHostedReviewLinkForMetaRefresh(
-            targetEnriched,
-            worktreeForUpdate,
-            'linkedAzureDevOpsPR'
-          ),
-          linkedGiteaPR: getHostedReviewLinkForMetaRefresh(
-            targetEnriched,
-            worktreeForUpdate,
-            'linkedGiteaPR'
-          ),
-          force: true
-        })
-      }
+      refreshHostedReviewAfterMetaUpdate(get, {
+        suppress: options?.suppressHostedReviewRefresh === true,
+        reviewRepo,
+        reviewBranch,
+        repoOwnerExecutionHostId: executionHostId ?? worktreeForUpdate?.hostId,
+        worktreeForUpdate,
+        targetEnriched
+      })
     } catch (err) {
       if (isRuntimeSelectorNotFoundError(err)) {
-        void get().fetchWorktrees(getRepoIdFromWorktreeId(worktreeId), recoveryFetchOptions)
+        await recoverAfterFailedPersist()
         return {
           ok: false,
           error: translate(
@@ -292,7 +298,7 @@ export function createUpdateWorktreeMeta(
         }
       }
       console.error('Failed to update worktree meta:', err)
-      void get().fetchWorktrees(getRepoIdFromWorktreeId(worktreeId), recoveryFetchOptions)
+      await recoverAfterFailedPersist()
       // Why: the refetch above reverts the optimistic write, so a caller that
       // closes its surface on this path shows the user a save that undid itself.
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
