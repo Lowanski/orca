@@ -9,7 +9,10 @@ import {
 import { DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { WorktreeColorTagMenuItems } from './WorktreeColorTagMenuItems'
 import { WorktreeColorTagPickerPopover } from './WorktreeColorTagPickerPopover'
-import { PARENT_PICKER_EXIT_ANIMATION_MS } from './worktree-context-menu-policy'
+import {
+  CLOSE_ALL_CONTEXT_MENUS_EVENT,
+  PARENT_PICKER_EXIT_ANIMATION_MS
+} from './worktree-context-menu-policy'
 
 // Why: the menu plays an exit animation, and Radix fires onCloseAutoFocus only once it finishes.
 // A picker opened before that runs gets its focus yanked to the sidebar by the menu's own focus
@@ -96,6 +99,24 @@ export function useWorktreeColorTagPicker({
     },
     [clearFallback, clearInactiveTimer]
   )
+
+  // Why: a right-click on another card during this menu's exit animation opens a new menu and
+  // broadcasts close-all, but the handoff would still open this picker over that menu with the old
+  // selection as its targets. Superseded means cancelled.
+  useEffect(() => {
+    const cancelPending = (): void => {
+      if (!pendingRef.current) {
+        return
+      }
+      pendingRef.current = false
+      clearFallback()
+      setSnapshot(null)
+      clearInactiveTimer()
+      onActiveChange(false)
+    }
+    window.addEventListener(CLOSE_ALL_CONTEXT_MENUS_EVENT, cancelPending)
+    return () => window.removeEventListener(CLOSE_ALL_CONTEXT_MENUS_EVENT, cancelPending)
+  }, [clearFallback, clearInactiveTimer, onActiveChange])
 
   const openPicker = useCallback(() => {
     setSnapshot(contextWorktrees)

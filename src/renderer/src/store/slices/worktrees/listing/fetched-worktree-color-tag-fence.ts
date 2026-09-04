@@ -31,19 +31,21 @@ export function preserveConcurrentColorTag<T extends Worktree>(
       (key === undefined ? undefined : startedByIdentity.get(key)) ?? startedById.get(worktree.id)
     const latest =
       (key === undefined ? undefined : currentByIdentity.get(key)) ?? currentById.get(worktree.id)
-    if (!started || !latest) {
+    if (!latest) {
       return worktree
     }
     // Why: the maps key by path-derived id, and a checkout deleted and recreated at the same path
     // mid-refresh puts a new occupant under the old id. Its color must not be inherited from the
     // rows that described the previous occupant.
-    if (!sameOccupant(worktree, started, latest)) {
+    if (!sameOccupant(worktree, latest, started)) {
       return worktree
     }
     // Why the pending guard: a fetch that started after the assignment but joined a listing
     // captured before it sees started and latest already equal to the new color, so only the
     // in-flight write tells the stale answer apart. Color writes emit no local invalidation, so
-    // without this the old tag would stick until an unrelated refresh.
+    // without this the old tag would stick until an unrelated refresh. A row that entered the store
+    // after this refresh began has no start snapshot to diff against, but a write in flight for it
+    // is still one this listing predates, so the fence decides for it alone.
     if (
       isColorTagPersistencePending(
         worktree.id,
@@ -54,7 +56,7 @@ export function preserveConcurrentColorTag<T extends Worktree>(
         latest.runtimeOwnerEnvironmentId ?? null,
         normalizeWorkspaceColorTag(worktree.colorTag)
       ) ||
-      (started.colorTag ?? null) !== (latest.colorTag ?? null)
+      (started !== undefined && (started.colorTag ?? null) !== (latest.colorTag ?? null))
     ) {
       return { ...worktree, colorTag: latest.colorTag ?? null }
     }
@@ -73,8 +75,12 @@ function byIdentity(rows: readonly Worktree[]): Map<string, Worktree> {
 }
 
 /** Rows without identities cannot be told apart and keep the pre-identity behaviour. */
-function sameOccupant(incoming: Worktree, started: Worktree, latest: Worktree): boolean {
-  const keys = [incoming.identity?.key, started.identity?.key, latest.identity?.key]
+function sameOccupant(
+  incoming: Worktree,
+  latest: Worktree,
+  started: Worktree | undefined
+): boolean {
+  const keys = [incoming.identity?.key, latest.identity?.key, started?.identity?.key]
   const known = keys.filter((key): key is string => key !== undefined)
   return known.every((key) => key === known[0])
 }

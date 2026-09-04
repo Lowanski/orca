@@ -64,6 +64,19 @@ describe('preserveConcurrentColorTag against a write that landed at t=1000', () 
     expect(merged[0]?.colorTag).toBe('#ef4444')
   })
 
+  // Regression: a row that entered the store after the refresh began had no start snapshot, and the
+  // merge returned the stale listing for it unfenced, so a color assigned meanwhile was erased with
+  // no reconcile to bring it back.
+  it('keeps the current color for a row missing from the start snapshot while its write is pending', () => {
+    const merged = preserveConcurrentColorTag(staleIncoming, [], current, anyHost, 900)
+    expect(merged[0]?.colorTag).toBe('#ef4444')
+  })
+
+  it('accepts the refreshed value for such a row once the fetch postdates the landing', () => {
+    const merged = preserveConcurrentColorTag(staleIncoming, [], current, anyHost, 1100)
+    expect(merged[0]?.colorTag).toBeNull()
+  })
+
   // Regression: two HUBs' rows for one checkout share id and host; the fence has to be asked about
   // exactly the row being merged, or a write for the sibling fences this one.
   it('asks the fence about the current row by its canonical identity', () => {

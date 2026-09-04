@@ -4,6 +4,7 @@ import { act, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Worktree } from '../../../../shared/worktree/types'
 import { useWorktreeColorTagPicker } from './use-worktree-color-tag-picker'
+import { CLOSE_ALL_CONTEXT_MENUS_EVENT } from './worktree-context-menu-policy'
 
 vi.mock('./WorktreeColorTagPickerPopover', () => ({
   WorktreeColorTagPickerPopover: (props: { open: boolean }) => (
@@ -85,6 +86,28 @@ describe('workspace color tag picker handoff', () => {
     act(() => vi.advanceTimersByTime(250))
     rerender()
     expect(isOpen(result.current.picker)).toBe(true)
+  })
+
+  // Regression: a right-click on another card during the menu's exit animation broadcast close-all,
+  // but the pending handoff still opened this picker over the new menu with the old selection.
+  it('cancels a pending handoff when another context menu opens', () => {
+    vi.useFakeTimers()
+    const onActiveChange = vi.fn()
+    const { result, rerender } = renderHook(() =>
+      useWorktreeColorTagPicker(args([worktree(null)], vi.fn(), vi.fn(), onActiveChange))
+    )
+
+    act(() => result.current.openPicker())
+    expect(onActiveChange).toHaveBeenLastCalledWith(true)
+    act(() => {
+      window.dispatchEvent(new Event(CLOSE_ALL_CONTEXT_MENUS_EVENT))
+    })
+    act(() => result.current.handleMenuCloseAutoFocus(new Event('x', { cancelable: true })))
+    act(() => vi.advanceTimersByTime(250))
+    rerender()
+
+    expect(isOpen(result.current.picker)).toBe(false)
+    expect(onActiveChange).toHaveBeenLastCalledWith(false)
   })
 
   it('runs the menu focus restore normally when no picker is pending', () => {
