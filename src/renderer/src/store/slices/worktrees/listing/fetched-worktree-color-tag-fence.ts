@@ -24,6 +24,12 @@ export function preserveConcurrentColorTag<T extends Worktree>(
     if (!started || !latest) {
       return worktree
     }
+    // Why: the maps key by path-derived id, and a checkout deleted and recreated at the same path
+    // mid-refresh puts a new occupant under the old id. Its color must not be inherited from the
+    // rows that described the previous occupant.
+    if (!sameOccupant(worktree, started, latest)) {
+      return worktree
+    }
     // Why the pending guard: a fetch that started after the assignment but joined a listing
     // captured before it sees started and latest already equal to the new color, so only the
     // in-flight write tells the stale answer apart. Color writes emit no local invalidation, so
@@ -41,6 +47,13 @@ export function preserveConcurrentColorTag<T extends Worktree>(
     }
     return worktree
   })
+}
+
+/** Rows without identities cannot be told apart and keep the pre-identity behaviour. */
+function sameOccupant(incoming: Worktree, started: Worktree, latest: Worktree): boolean {
+  const keys = [incoming.identity?.key, started.identity?.key, latest.identity?.key]
+  const known = keys.filter((key): key is string => key !== undefined)
+  return known.every((key) => key === known[0])
 }
 
 // The earliest moment this data could have been captured: the shared scan's start when the caller

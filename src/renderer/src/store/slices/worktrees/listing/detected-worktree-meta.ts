@@ -76,9 +76,10 @@ export function folderWorkspaceMatchesHost(
 }
 
 /**
- * The one row for a worktree whose canonical identity matches, or undefined without a key. Two
- * paired runtimes can publish one checkout as two rows sharing id and host; this is how a caller
- * that knows the exact row asks for it.
+ * The row for a canonical identity, or undefined without a key. Deliberately not filtered by the
+ * requested id: a local folder rename retires the path-derived locator, and a write issued from
+ * the still-visible old row must follow the identity to the row's current id rather than recreate
+ * metadata under the retired one. The requested id only picks the repository to search.
  */
 export function findKnownWorktreeByIdentityKey(
   state: Pick<AppState, 'worktreesByRepo' | 'detectedWorktreesByRepo'>,
@@ -88,18 +89,16 @@ export function findKnownWorktreeByIdentityKey(
   if (identityKey === undefined) {
     return undefined
   }
-  const visible = state.worktreesByRepo[getRepoIdFromWorktreeId(worktreeId)]?.find(
-    (worktree) => worktree.id === worktreeId && worktree.identity?.key === identityKey
+  const repoId = getRepoIdFromWorktreeId(worktreeId)
+  const visible = state.worktreesByRepo[repoId]?.find(
+    (worktree) => worktree.identity?.key === identityKey
   )
   if (visible) {
     return visible
   }
-  return (
-    findIndexedDetectedWorktrees(
-      state.detectedWorktreesByRepo,
-      worktreeId
-    ) as DetectedWorktreeListResult['worktrees']
-  ).find((worktree) => worktree.identity?.key === identityKey)
+  return state.detectedWorktreesByRepo[repoId]?.worktrees.find(
+    (worktree) => worktree.identity?.key === identityKey
+  )
 }
 
 export function findKnownWorktreeById(

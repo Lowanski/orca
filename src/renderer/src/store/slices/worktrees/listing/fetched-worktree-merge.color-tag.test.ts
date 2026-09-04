@@ -67,3 +67,40 @@ describe('preserveConcurrentColorTag', () => {
     ).toEqual(incoming)
   })
 })
+
+describe('preserveConcurrentColorTag across occupant turnover', () => {
+  const withIdentity = (colorTag: string | null, key: string): Worktree =>
+    ({ id: 'a', hostId: 'local', colorTag, identity: { key } }) as unknown as Worktree
+
+  // Regression: the fence maps key by path-derived id, so a checkout recreated at the same path
+  // mid-refresh inherited the previous occupant's optimistic color.
+  it("does not hand a replacement occupant the previous occupant's color", () => {
+    const merged = preserveConcurrentColorTag(
+      [withIdentity(null, 'k-new')],
+      [withIdentity(null, 'k-old')],
+      [withIdentity('#ef4444', 'k-old')],
+      anyHost
+    )
+    expect(merged[0]?.colorTag).toBeNull()
+  })
+
+  it('still preserves for the same occupant', () => {
+    const merged = preserveConcurrentColorTag(
+      [withIdentity(null, 'k-same')],
+      [withIdentity(null, 'k-same')],
+      [withIdentity('#ef4444', 'k-same')],
+      anyHost
+    )
+    expect(merged[0]?.colorTag).toBe('#ef4444')
+  })
+
+  it('keeps pre-identity behaviour when rows carry no identity', () => {
+    const merged = preserveConcurrentColorTag(
+      [worktree('a', null)],
+      [worktree('a', null)],
+      [worktree('a', '#ef4444')],
+      anyHost
+    )
+    expect(merged[0]?.colorTag).toBe('#ef4444')
+  })
+})

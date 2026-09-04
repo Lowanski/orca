@@ -699,3 +699,41 @@ describe('failure recovery does not delay non-color metadata writes', () => {
     expect(fetchWorktrees).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('identity-pinned writes across a folder rename', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetRemoteRuntimeMocks()
+  })
+
+  // Regression: the identity lookup also required the requested id, so a write from the
+  // still-visible pre-rename row persisted under the retired locator and the renamed row never
+  // received the color — or, once the renamed row had arrived, the identity was reported missing.
+  it('follows the identity to the renamed row and persists under its current id', async () => {
+    const store = createTestStore()
+    const renamed = makeWorktree({
+      id: 'repo1::/path/after',
+      repoId: 'repo1',
+      path: '/path/after',
+      identity: { key: 'k-moved' } as never,
+      colorTag: null
+    })
+    store.setState({ worktreesByRepo: { repo1: [renamed] } } as Partial<AppState>)
+
+    const result = await store
+      .getState()
+      .updateWorktreeMeta(
+        'repo1::/path/before',
+        { colorTag: '#ef4444' },
+        { identityKey: 'k-moved' }
+      )
+
+    expect(result.ok).toBe(true)
+    expect(store.getState().worktreesByRepo.repo1[0]?.colorTag).toBe('#ef4444')
+    expect(mockApi.worktrees.updateMeta).toHaveBeenCalledTimes(1)
+    expect(JSON.stringify(mockApi.worktrees.updateMeta.mock.calls[0])).toContain(
+      'repo1::/path/after'
+    )
+    expect(JSON.stringify(mockApi.worktrees.updateMeta.mock.calls[0])).not.toContain('/path/before')
+  })
+})

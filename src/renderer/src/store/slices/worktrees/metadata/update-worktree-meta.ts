@@ -34,13 +34,21 @@ export function createUpdateWorktreeMeta(
   set: WorktreeSliceSet,
   get: WorktreeSliceGet
 ): WorktreeSlice['updateWorktreeMeta'] {
-  return async (worktreeId, updates, options) => {
+  return async (requestedWorktreeId, updates, options) => {
     const shouldApplyUpdate = options?.shouldApply
     const requestedHostId = options?.executionHostId
     // Why: two paired runtimes can publish one checkout as two rows with the same id and host; a
     // caller that knows the exact row pins it so lookup, optimistic apply, and persistence agree.
     const requestedIdentityKey = options?.identityKey
-    const identityMatch = findKnownWorktreeByIdentityKey(get(), worktreeId, requestedIdentityKey)
+    const identityMatch = findKnownWorktreeByIdentityKey(
+      get(),
+      requestedWorktreeId,
+      requestedIdentityKey
+    )
+    // Why: a folder rename retires the path-derived locator while the old row is still visible; a
+    // pinned write follows the identity to the row's current id so it is never persisted under
+    // the retired one and never rejected as missing once the renamed row has arrived.
+    const worktreeId = identityMatch?.id ?? requestedWorktreeId
     // Why not fall back: the locator is mutable — the row may be gone or its path reused — and local
     // persistence carries no identity, so a fallback would stamp the value on whatever occupies the
     // path now, or recreate metadata for a deleted workspace.
