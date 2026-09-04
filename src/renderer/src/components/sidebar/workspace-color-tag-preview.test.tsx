@@ -109,4 +109,24 @@ describe('workspace color tag preview channel', () => {
     act(() => clearWorkspaceColorTagPreviews(IDS, other))
     expect(a.result.current).toBeUndefined()
   })
+
+  // Regression: a pending write held a preview and the user dragged a custom color over it; the
+  // drag replaced the single slot, so Escape on the picker dropped both and the card snapped to the
+  // persisted strip until the RPC landed.
+  it('reveals the layer beneath when the top owner clears', () => {
+    const a = renderHook(() => useWorkspaceColorTagPreview('h::a'))
+    act(() => setWorkspaceColorTagPreviews(IDS, '#111111', owner))
+    act(() => setWorkspaceColorTagPreviews(IDS, '#222222', other))
+    expect(a.result.current).toBe('#222222')
+
+    act(() => clearWorkspaceColorTagPreviews(IDS, other))
+    expect(a.result.current).toBe('#111111')
+
+    act(() => setWorkspaceColorTagPreviews(IDS, '#333333', other))
+    act(() => setWorkspaceColorTagPreviews(IDS, '#444444', owner))
+    // Re-setting an owner moves its layer to the top.
+    expect(a.result.current).toBe('#444444')
+    act(() => clearWorkspaceColorTagPreviews(IDS, owner))
+    expect(a.result.current).toBe('#333333')
+  })
 })

@@ -17,9 +17,11 @@ import {
  * its queue drains. Keyed by color-tag identity so the same worktree id on two hosts previews
  * independently. Nothing here is persisted or synced.
  *
- * Why owners: a picker that has closed keeps holding its preview until its write lands. If another
- * picker previews the same card in the meantime, the first one's clear must not erase the newer
- * live preview, so every entry remembers who set it and a clear only removes its own.
+ * Why owners, layered: a picker that has closed keeps holding its preview until its write lands, and
+ * a pending write holds one too. If another picker previews the same card in the meantime, neither
+ * earlier holder's clear may erase the newer live preview, and when the newer one is cleared (Escape
+ * on the picker) the card must show the color still held beneath it, not the persisted strip. So
+ * every row keeps one layer per owner, bottom to top, and the top layer is what the card shows.
  */
 export type WorkspaceColorTagPreviewOwner = symbol
 
@@ -30,10 +32,16 @@ export function createWorkspaceColorTagPreviewOwner(): WorkspaceColorTagPreviewO
 type PreviewedWorktree = Pick<Worktree, 'id' | 'hostId' | 'identity' | 'runtimeOwnerEnvironmentId'>
 
 /** A previewed `null` is "no color", as distinct from `undefined`, "nothing previewed". */
-type PreviewEntry = { colorTag: string | null; owner: WorkspaceColorTagPreviewOwner }
+type PreviewLayer = { colorTag: string | null; owner: WorkspaceColorTagPreviewOwner }
 
-const previews = new Map<string, PreviewEntry>()
+/** Bottom to top per identity; the top layer is what the card shows. */
+const previews = new Map<string, PreviewLayer[]>()
 const listeners = new Set<() => void>()
+
+function topLayer(identity: string): string | null | undefined {
+  const layers = previews.get(identity)
+  return layers ? layers.at(-1)?.colorTag : undefined
+}
 
 function emit(): void {
   for (const listener of listeners) {
@@ -51,27 +59,41 @@ export function setWorkspaceColorTagPreviews(
 ): void {
   let changed = false
   for (const identity of identities) {
-    const entry = previews.get(identity)
-    if (entry?.colorTag !== colorTag || entry.owner !== owner) {
-      previews.set(identity, { colorTag, owner })
-      changed = true
+    const layers = previews.get(identity) ?? []
+    const index = layers.findIndex((layer) => layer.owner === owner)
+    const top = layers.at(-1)
+    if (index === layers.length - 1 && top?.colorTag === colorTag) {
+      continue
     }
+    if (index !== -1) {
+      layers.splice(index, 1)
+    }
+    layers.push({ colorTag, owner })
+    previews.set(identity, layers)
+    changed = true
   }
   if (changed) {
     emit()
   }
 }
 
-/** Removes only the entries this owner set; a newer preview from another picker stays. */
+/** Removes only this owner's layer; whatever another holder set above or beneath it stays. */
 export function clearWorkspaceColorTagPreviews(
   identities: readonly string[],
   owner: WorkspaceColorTagPreviewOwner
 ): void {
   let changed = false
   for (const identity of identities) {
-    if (previews.get(identity)?.owner === owner && previews.delete(identity)) {
-      changed = true
+    const layers = previews.get(identity)
+    const index = layers?.findIndex((layer) => layer.owner === owner) ?? -1
+    if (!layers || index === -1) {
+      continue
     }
+    layers.splice(index, 1)
+    if (layers.length === 0) {
+      previews.delete(identity)
+    }
+    changed = true
   }
   if (changed) {
     emit()
@@ -93,18 +115,18 @@ function subscribe(listener: () => void): () => void {
 export function readWorkspaceColorTagPreview(
   worktree: PreviewedWorktree
 ): string | null | undefined {
-  const canonical = previews.get(getWorkspaceColorTagIdentity(worktree))
-  if (canonical) {
-    return canonical.colorTag
+  const canonical = topLayer(getWorkspaceColorTagIdentity(worktree))
+  if (canonical !== undefined) {
+    return canonical
   }
-  return previews.get(getWorkspaceColorTagFallbackIdentity(worktree))?.colorTag
+  return topLayer(getWorkspaceColorTagFallbackIdentity(worktree))
 }
 
 /** The previewed color for this card, or undefined when nothing is being previewed. */
 export function useWorkspaceColorTagPreview(identity: string): string | null | undefined {
   return useSyncExternalStore(
     subscribe,
-    () => previews.get(identity)?.colorTag,
+    () => topLayer(identity),
     () => undefined
   )
 }

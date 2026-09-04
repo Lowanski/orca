@@ -4,6 +4,7 @@ import { act, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Worktree } from '../../../../shared/worktree/types'
 import { useWorktreeColorTagPicker } from './use-worktree-color-tag-picker'
+import { useAppStore } from '@/store'
 import { CLOSE_ALL_CONTEXT_MENUS_EVENT } from './worktree-context-menu-policy'
 import { getWorkspaceColorTagIdentity } from '../../../../shared/workspace-color-tag'
 import {
@@ -116,6 +117,40 @@ describe('workspace color tag picker handoff', () => {
     expect(onActiveChange).toHaveBeenLastCalledWith(false)
   })
 
+  // Regression: after close-all cancelled the handoff, the old menu's late close-auto-focus saw no
+  // pending picker and focused the sidebar, a focus-outside that dismissed the newly opened menu.
+  it('restores no focus for the superseded menu, once, after a cancelled handoff', () => {
+    vi.useFakeTimers()
+    const { result, restoreMenuFocus } = render([worktree(null)])
+
+    act(() => result.current.openPicker())
+    act(() => {
+      window.dispatchEvent(new Event(CLOSE_ALL_CONTEXT_MENUS_EVENT))
+    })
+    const late = new Event('x', { cancelable: true })
+    act(() => result.current.handleMenuCloseAutoFocus(late))
+    expect(restoreMenuFocus).not.toHaveBeenCalled()
+    expect(late.defaultPrevented).toBe(true)
+
+    const next = new Event('y', { cancelable: true })
+    act(() => result.current.handleMenuCloseAutoFocus(next))
+    expect(restoreMenuFocus).toHaveBeenCalledWith(next)
+  })
+
+  it('forgets a cancelled handoff once the close-auto-focus window has passed', () => {
+    vi.useFakeTimers()
+    const { result, restoreMenuFocus } = render([worktree(null)])
+
+    act(() => result.current.openPicker())
+    act(() => {
+      window.dispatchEvent(new Event(CLOSE_ALL_CONTEXT_MENUS_EVENT))
+    })
+    act(() => vi.advanceTimersByTime(250))
+    const event = new Event('x', { cancelable: true })
+    act(() => result.current.handleMenuCloseAutoFocus(event))
+    expect(restoreMenuFocus).toHaveBeenCalledWith(event)
+  })
+
   it('runs the menu focus restore normally when no picker is pending', () => {
     const { result, restoreMenuFocus } = render([worktree(null)])
     const event = new Event('x', { cancelable: true })
@@ -146,6 +181,42 @@ describe('workspace color tag picker handoff', () => {
   it('seeds the picker as untagged when the selection is mixed', () => {
     const { result } = render([worktree('#ef4444'), worktree('#22c55e')])
     expect(result.current.sharedColorTag).toBeNull()
+  })
+
+  // Regression: the menu's rows are a snapshot taken when it opened; once a pending folder write
+  // landed and its preview cleared, the row fell back to the pre-write color and the toggle inverted.
+  it('reads the live store row before the frozen menu row', () => {
+    const frozen = { id: 'repo1::/live', colorTag: null } as unknown as Worktree
+    const before = useAppStore.getState().worktreesByRepo
+    try {
+      act(() =>
+        useAppStore.setState({
+          worktreesByRepo: { repo1: [{ ...frozen, colorTag: '#22c55e' }] }
+        } as never)
+      )
+      const { result } = render([frozen])
+      expect(result.current.sharedColorTag).toBe('#22c55e')
+    } finally {
+      act(() => useAppStore.setState({ worktreesByRepo: before } as never))
+    }
+  })
+
+  // Regression: the custom picker seeded from the frozen rows, so opening it during a pending write
+  // started the wheel at the previous color rather than the one on the card.
+  it('seeds the custom picker from what the card shows', () => {
+    vi.useFakeTimers()
+    const owner = createWorkspaceColorTagPreviewOwner()
+    const row = worktree(null)
+    const key = getWorkspaceColorTagIdentity(row)
+    try {
+      act(() => setWorkspaceColorTagPreviews([key], '#ef4444', owner))
+      const { result, rerender } = render([row])
+      act(() => result.current.openPicker())
+      rerender()
+      expect((result.current.picker.props as { colorTag: string | null }).colorTag).toBe('#ef4444')
+    } finally {
+      act(() => clearWorkspaceColorTagPreviews([key], owner))
+    }
   })
 
   // Regression: a preset write still in flight showed on the card through the preview channel, but

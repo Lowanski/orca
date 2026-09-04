@@ -1,6 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 
 import type { Worktree } from '../../../../shared/worktree/types'
+import { useAppStore } from '@/store'
+import type { AppState } from '@/store/types'
+import {
+  findKnownWorktreeById,
+  findPinnedWorktreeRow
+} from '@/store/slices/worktrees/listing/detected-worktree-meta'
 import {
   getSharedWorkspaceColorTag,
   getWorkspaceColorTagIdentity,
@@ -67,8 +74,12 @@ export function useWorktreeColorTagPicker({
   // picker would preview and commit a single workspace when the user right-clicked several.
   const [snapshot, setSnapshot] = useState<readonly Worktree[] | null>(null)
   const pendingRef = useRef(false)
+  // Why: set when another menu superseded a pending handoff; the old menu's late close-auto-focus
+  // then restores nothing, once, instead of focusing the sidebar under the new menu.
+  const cancelledRef = useRef(false)
   const fallbackTimerRef = useRef<number | null>(null)
   const inactiveTimerRef = useRef<number | null>(null)
+  const cancelledTimerRef = useRef<number | null>(null)
 
   const clearFallback = useCallback(() => {
     if (fallbackTimerRef.current != null) {
@@ -97,6 +108,9 @@ export function useWorktreeColorTagPicker({
     () => () => {
       clearFallback()
       clearInactiveTimer()
+      if (cancelledTimerRef.current != null) {
+        window.clearTimeout(cancelledTimerRef.current)
+      }
     },
     [clearFallback, clearInactiveTimer]
   )
@@ -114,6 +128,16 @@ export function useWorktreeColorTagPicker({
       setSnapshot(null)
       clearInactiveTimer()
       onActiveChange(false)
+      // Why the timer: the old menu's close-auto-focus usually arrives within its exit animation; if
+      // it never does, the flag must not skip a later, unrelated close's focus restore.
+      cancelledRef.current = true
+      if (cancelledTimerRef.current != null) {
+        window.clearTimeout(cancelledTimerRef.current)
+      }
+      cancelledTimerRef.current = window.setTimeout(() => {
+        cancelledTimerRef.current = null
+        cancelledRef.current = false
+      }, CLOSE_AUTO_FOCUS_FALLBACK_MS)
     }
     window.addEventListener(CLOSE_ALL_CONTEXT_MENUS_EVENT, cancelPending)
     return () => window.removeEventListener(CLOSE_ALL_CONTEXT_MENUS_EVENT, cancelPending)
@@ -130,6 +154,13 @@ export function useWorktreeColorTagPicker({
 
   const handleMenuCloseAutoFocus = useCallback(
     (event: Event): void => {
+      if (cancelledRef.current) {
+        // Why no restore: the menu that superseded this one is open now, and focusing the sidebar
+        // would be a focus-outside for it, dismissing it on arrival.
+        cancelledRef.current = false
+        event.preventDefault()
+        return
+      }
       if (!pendingRef.current) {
         restoreMenuFocus(event)
         return
@@ -160,28 +191,20 @@ export function useWorktreeColorTagPicker({
     [clearInactiveTimer, onActiveChange]
   )
 
-  // Why previews: a write in flight (a folder row over a slow runtime) shows on the card through the
-  // preview channel before the store changes; the row's checked swatch and its toggle must agree
-  // with what the card shows, or an immediate undo picks the wrong direction.
-  const contextPreviews = useWorkspaceColorTagPreviewsForWorktrees(contextWorktrees)
-  const contextTags = useMemo(
-    () =>
-      contextWorktrees.map((item, index) => {
-        const preview = contextPreviews[index]
-        return preview === undefined ? item.colorTag : preview
-      }),
-    [contextPreviews, contextWorktrees]
-  )
+  // Why three sources: a write in flight shows on the card through the preview channel before the
+  // store changes; once it lands the preview clears, but the menu's rows are a snapshot taken when
+  // it opened, so the live store row is consulted before that frozen copy. The row's checked swatch,
+  // its toggle, and the custom picker's seed all read what the card is showing, or an immediate undo
+  // picks the wrong direction.
+  const contextTags = useEffectiveColorTags(contextWorktrees)
   // Why: toggle-off keys off the whole selection, so unifying a mixed selection assigns
   // rather than clears.
   const sharedColorTag = useMemo(() => getSharedWorkspaceColorTag(contextTags), [contextTags])
   const mixed = useMemo(() => isMixedWorkspaceColorTagSelection(contextTags), [contextTags])
 
   const pickerTargets = snapshot ?? contextWorktrees
-  const pickerColorTag = useMemo(
-    () => getSharedWorkspaceColorTag(pickerTargets.map((item) => item.colorTag)),
-    [pickerTargets]
-  )
+  const pickerTags = useEffectiveColorTags(pickerTargets)
+  const pickerColorTag = useMemo(() => getSharedWorkspaceColorTag(pickerTags), [pickerTags])
   const previewIdentities = useMemo(
     () => pickerTargets.map((item) => getWorkspaceColorTagIdentity(item)),
     [pickerTargets]
@@ -226,4 +249,36 @@ export function useWorktreeColorTagPicker({
       />
     )
   }
+}
+
+function liveColorTag(state: AppState, row: Worktree): string | null | undefined {
+  // Why the guard: a host can mount the menu over a reduced store that carries no worktree
+  // catalogs; the frozen row is then the best answer, not a crash in the finder.
+  if (!state.worktreesByRepo || !state.detectedWorktreesByRepo || !state.folderWorkspaces) {
+    return undefined
+  }
+  const match =
+    findPinnedWorktreeRow(state, row.id, row.hostId, {
+      identityKey: row.identity?.key,
+      runtimeOwnerEnvironmentId: row.runtimeOwnerEnvironmentId ?? null
+    }) ?? findKnownWorktreeById(state, row.id, row.hostId)
+  return match ? (match.colorTag ?? null) : undefined
+}
+
+/** Preview if any, else the live store row, else the frozen menu row: what the card is showing. */
+function useEffectiveColorTags(rows: readonly Worktree[]): readonly (string | null | undefined)[] {
+  const previews = useWorkspaceColorTagPreviewsForWorktrees(rows)
+  const live = useAppStore(useShallow((state) => rows.map((row) => liveColorTag(state, row))))
+  return useMemo(
+    () =>
+      rows.map((row, index) => {
+        const preview = previews[index]
+        if (preview !== undefined) {
+          return preview
+        }
+        const current = live[index]
+        return current !== undefined ? current : row.colorTag
+      }),
+    [live, previews, rows]
+  )
 }
