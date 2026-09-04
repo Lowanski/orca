@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppState } from '../types'
-import { makeWorktree } from './worktrees-slice-test-fixtures'
+import { toRuntimeExecutionHostId } from '../../../../shared/execution-host'
+import { folderWorkspaceKey } from '../../../../shared/workspace-scope'
+import { makeFolderWorkspace, makeWorktree } from './worktrees-slice-test-fixtures'
 import {
   createTestStore,
   mockApi,
@@ -117,6 +119,68 @@ describe('runtime-owner-scoped writes for identity-less rows', () => {
     expect(store.getState().worktreesByRepo.repo1[0]?.colorTag).toBeNull()
     expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
     expect(mockApi.worktrees.updateMeta).not.toHaveBeenCalled()
+  })
+})
+
+describe('runtime-owner pins on folder workspaces', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetRemoteRuntimeMocks()
+  })
+
+  // Regression: the folder projection carries its paired runtime as owner, the color writer
+  // forwards it as a pin, and the pinned lookup searched only the git catalogs, so every color
+  // write to a runtime-owned folder workspace was rejected as "no longer available".
+  it('colors a folder workspace owned by a paired runtime through the folder route', async () => {
+    const store = createTestStore()
+    const hostId = toRuntimeExecutionHostId('env-b')
+    const folder = makeFolderWorkspace({ id: 'folder-b', executionHostId: hostId, colorTag: null })
+    const updateFolderWorkspace = vi.fn().mockResolvedValue(true)
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-a' } as never,
+      folderWorkspaces: [folder],
+      updateFolderWorkspace
+    } as unknown as Partial<AppState>)
+
+    const result = await store
+      .getState()
+      .updateWorktreeMeta(
+        folderWorkspaceKey(folder.id),
+        { colorTag: '#ef4444' },
+        { executionHostId: hostId, runtimeOwnerEnvironmentId: 'env-b' }
+      )
+
+    expect(result.ok).toBe(true)
+    expect(updateFolderWorkspace).toHaveBeenCalledWith(
+      'folder-b',
+      { colorTag: '#ef4444' },
+      { executionHostId: hostId }
+    )
+  })
+
+  it('still reports not-found for a folder pinned to an owner it no longer has', async () => {
+    const store = createTestStore()
+    const folder = makeFolderWorkspace({
+      id: 'folder-b',
+      executionHostId: toRuntimeExecutionHostId('env-b'),
+      colorTag: null
+    })
+    const updateFolderWorkspace = vi.fn().mockResolvedValue(true)
+    store.setState({
+      folderWorkspaces: [folder],
+      updateFolderWorkspace
+    } as unknown as Partial<AppState>)
+
+    const result = await store
+      .getState()
+      .updateWorktreeMeta(
+        folderWorkspaceKey(folder.id),
+        { colorTag: '#ef4444' },
+        { runtimeOwnerEnvironmentId: 'env-c' }
+      )
+
+    expect(result.ok).toBe(false)
+    expect(updateFolderWorkspace).not.toHaveBeenCalled()
   })
 })
 

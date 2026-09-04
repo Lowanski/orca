@@ -117,7 +117,7 @@ export function isPinnedWorktreeMetaUpdate(pin: WorktreeMetaRowPin | undefined):
  * sharing id and host, and an id-and-host lookup would land on either. Undefined when nothing pins.
  */
 export function findPinnedWorktreeRow(
-  state: Pick<AppState, 'worktreesByRepo' | 'detectedWorktreesByRepo'>,
+  state: Pick<AppState, 'worktreesByRepo' | 'detectedWorktreesByRepo' | 'folderWorkspaces'>,
   worktreeId: string,
   executionHostId: ExecutionHostId | undefined,
   pin: WorktreeMetaRowPin | undefined
@@ -133,6 +133,12 @@ export function findPinnedWorktreeRow(
     worktree.id === worktreeId &&
     worktree.runtimeOwnerEnvironmentId === owner &&
     worktreeRowMatchesMetaHost(worktree, executionHostId)
+  // Why: a folder workspace published by a paired runtime projects that runtime as its owner and
+  // lives in its own list; searching only the git catalogs rejected every such folder as gone.
+  if (parseWorkspaceKey(worktreeId)?.type === 'folder') {
+    const folder = findKnownWorktreeById(state, worktreeId, executionHostId)
+    return folder && ownsRow(folder) ? folder : undefined
+  }
   const repoId = getRepoIdFromWorktreeId(worktreeId)
   return (
     state.worktreesByRepo[repoId]?.find(ownsRow) ??
