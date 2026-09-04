@@ -54,15 +54,18 @@ export function useWorktreeContextMenuCommands(args: {
   // settle in order on a slow host — one write set in flight, and when it lands the newest pending
   // color for *each* workspace is written. A single "latest batch" slot would let an assignment to
   // A+C wholesale replace a still-pending assignment to A+B and silently drop B's color.
+  // Why lazy: the renderer's useRef ratchet forbids work in the initializer — `new Map()` there
+  // would allocate on every render and be discarded after the first — so the queue is built on
+  // first use inside the handler.
   const colorTagWriteRef = useRef<{
     inFlight: boolean
     pending: Map<string, { worktree: Worktree; colorTag: string | null }>
-  }>({ inFlight: false, pending: new Map() })
+  } | null>(null)
   const handleAssignColorTag = useCallback(
     // Why explicit targets: the picker commits after the menu has closed, when the model's
     // active selection has already fallen back to the clicked row.
     (colorTag: string | null, targets: readonly Worktree[] = args.activeContextWorktrees) => {
-      const state = colorTagWriteRef.current
+      const state = (colorTagWriteRef.current ??= { inFlight: false, pending: new Map() })
       for (const worktree of targets) {
         state.pending.set(getWorktreeHostIdentity(worktree), { worktree, colorTag })
       }
