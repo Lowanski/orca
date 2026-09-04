@@ -104,6 +104,42 @@ export function findKnownWorktreeByIdentityKey(
   )
 }
 
+/** What a caller uses to address one exact row: its identity, or its runtime owner before it has one. */
+export type WorktreeMetaRowPin = { identityKey?: string; runtimeOwnerEnvironmentId?: string }
+
+export function isPinnedWorktreeMetaUpdate(pin: WorktreeMetaRowPin | undefined): boolean {
+  return pin?.identityKey !== undefined || pin?.runtimeOwnerEnvironmentId !== undefined
+}
+
+/**
+ * The row a pinned write addresses. Identity wins when the caller knows it. An identity-less row is
+ * picked by id, host, and runtime owner: two paired runtimes can publish one checkout as two rows
+ * sharing id and host, and an id-and-host lookup would land on either. Undefined when nothing pins.
+ */
+export function findPinnedWorktreeRow(
+  state: Pick<AppState, 'worktreesByRepo' | 'detectedWorktreesByRepo'>,
+  worktreeId: string,
+  executionHostId: ExecutionHostId | undefined,
+  pin: WorktreeMetaRowPin | undefined
+): Worktree | DetectedWorktreeListResult['worktrees'][number] | undefined {
+  if (pin?.identityKey !== undefined) {
+    return findKnownWorktreeByIdentityKey(state, worktreeId, pin.identityKey)
+  }
+  const owner = pin?.runtimeOwnerEnvironmentId
+  if (owner === undefined) {
+    return undefined
+  }
+  const ownsRow = (worktree: Worktree): boolean =>
+    worktree.id === worktreeId &&
+    worktree.runtimeOwnerEnvironmentId === owner &&
+    worktreeRowMatchesMetaHost(worktree, executionHostId)
+  const repoId = getRepoIdFromWorktreeId(worktreeId)
+  return (
+    state.worktreesByRepo[repoId]?.find(ownsRow) ??
+    state.detectedWorktreesByRepo[repoId]?.worktrees.find(ownsRow)
+  )
+}
+
 export function findKnownWorktreeById(
   state: Pick<AppState, 'worktreesByRepo' | 'detectedWorktreesByRepo' | 'folderWorkspaces'>,
   worktreeId: string,

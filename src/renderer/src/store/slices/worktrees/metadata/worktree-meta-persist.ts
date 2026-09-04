@@ -68,9 +68,16 @@ export function isColorTagPersistencePending(
   worktreeId: string,
   executionHostId?: ExecutionHostId,
   fetchStartedAt?: number,
-  identityKey?: string
+  identityKey?: string,
+  runtimeOwnerEnvironmentId?: string
 ): boolean {
-  return colorTagWriteFence.isPending(worktreeId, executionHostId, fetchStartedAt, identityKey)
+  return colorTagWriteFence.isPending(
+    worktreeId,
+    executionHostId,
+    fetchStartedAt,
+    identityKey,
+    runtimeOwnerEnvironmentId
+  )
 }
 
 export function persistWorktreeMeta(
@@ -78,7 +85,9 @@ export function persistWorktreeMeta(
   worktreeId: string,
   updates: Partial<WorktreeMeta>,
   executionHostId?: ExecutionHostId,
-  identityKey?: string
+  identityKey?: string,
+  /** Fence scope only; routing the write to its owner is the caller's job (resolvePinnedOwnerRouting). */
+  runtimeOwnerEnvironmentId?: string
 ): Promise<void> {
   const operation = persistWorktreeMetaUntracked(
     settings,
@@ -99,7 +108,12 @@ export function persistWorktreeMeta(
     onFailed.push(drop)
   }
   if ('colorTag' in updates) {
-    const fence = colorTagWriteFence.begin(worktreeId, executionHostId, identityKey)
+    const fence = colorTagWriteFence.begin(
+      worktreeId,
+      executionHostId,
+      identityKey,
+      runtimeOwnerEnvironmentId
+    )
     onLanded.push(fence.landed)
     onFailed.push(fence.failed)
   }

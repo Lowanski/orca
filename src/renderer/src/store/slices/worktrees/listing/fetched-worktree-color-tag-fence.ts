@@ -40,7 +40,8 @@ export function preserveConcurrentColorTag<T extends Worktree>(
         worktree.id,
         latest.hostId,
         requestStartedAt,
-        latest.identity?.key
+        latest.identity?.key,
+        latest.runtimeOwnerEnvironmentId
       ) ||
       (started.colorTag ?? null) !== (latest.colorTag ?? null)
     ) {

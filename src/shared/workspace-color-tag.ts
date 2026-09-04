@@ -64,7 +64,9 @@ export function getWorkspaceColorTagIdentity(
     return worktree.identity.key
   }
   const hostIdentity = getWorktreeHostIdentity(worktree)
+  // Why serialize: SSH aliases and paths can contain '@', so a separator join is not injective and a
+  // direct row whose id ends in "@env-a" would share a key with the row env-a owns.
   return worktree.runtimeOwnerEnvironmentId
-    ? `${hostIdentity}@${worktree.runtimeOwnerEnvironmentId}`
+    ? JSON.stringify([hostIdentity, worktree.runtimeOwnerEnvironmentId])
     : hostIdentity
 }

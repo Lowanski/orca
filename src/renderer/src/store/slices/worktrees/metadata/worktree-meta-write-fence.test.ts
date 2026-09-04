@@ -69,6 +69,24 @@ describe('MetaWriteFence', () => {
     expect(legacy.isPending('w', 'ssh:box', undefined, 'k-b')).toBe(true)
   })
 
+  // Regression: before a nested-SSH row has an identity, HUB A and HUB B expose it as rows sharing
+  // id and host that differ only by runtime owner; a write for A's row fenced B's refresh.
+  it('does not let a write for one runtime owner fence a refresh of the sibling owner', () => {
+    const { fence } = fenceAt(1000)
+    fence.begin('w', 'ssh:box', undefined, 'env-a')
+    expect(fence.isPending('w', 'ssh:box', undefined, undefined, 'env-a')).toBe(true)
+    expect(fence.isPending('w', 'ssh:box', undefined, undefined, 'env-b')).toBe(false)
+  })
+
+  it('falls back to id and host when either side has no runtime owner', () => {
+    const { fence } = fenceAt(1000)
+    fence.begin('w', 'ssh:box', undefined, 'env-a')
+    expect(fence.isPending('w', 'ssh:box')).toBe(true)
+    const { fence: legacy } = fenceAt(1000)
+    legacy.begin('w', 'ssh:box')
+    expect(legacy.isPending('w', 'ssh:box', undefined, undefined, 'env-b')).toBe(true)
+  })
+
   it('matches a host-agnostic query against a host-scoped entry and vice versa', () => {
     const { fence } = fenceAt(1000)
     fence.begin('w', 'ssh:box')

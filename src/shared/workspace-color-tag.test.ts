@@ -139,6 +139,15 @@ describe('getWorkspaceColorTagIdentity', () => {
     )
   })
 
+  // Regression: the fallback joined host identity and owner with '@', which paths may contain.
+  it('keeps a delimiter inside the id from colliding with a runtime-owned row', () => {
+    const direct = { id: 'repo::/srv/w@env-a', hostId: 'ssh:box' }
+    const owned = { id: 'repo::/srv/w', hostId: 'ssh:box', runtimeOwnerEnvironmentId: 'env-a' }
+    expect(getWorkspaceColorTagIdentity(direct as never)).not.toBe(
+      getWorkspaceColorTagIdentity(owned as never)
+    )
+  })
+
   it('falls back to the host-qualified identity for rows without one', () => {
     const local = getWorkspaceColorTagIdentity({ id: 'repo::w', hostId: undefined } as never)
     const remote = getWorkspaceColorTagIdentity({ id: 'repo::w', hostId: 'ssh:box' } as never)

@@ -9,7 +9,8 @@ import { getGitHubPRCacheKey, getLegacyGitHubPRCacheKey } from '../../github-cac
 import {
   applyDetectedWorktreeUpdates,
   findKnownWorktreeById,
-  findKnownWorktreeByIdentityKey
+  findPinnedWorktreeRow,
+  isPinnedWorktreeMetaUpdate
 } from '../listing/detected-worktree-meta'
 import {
   bumpHostedReviewLinkMutationGeneration,
@@ -34,21 +35,20 @@ export function createUpdateWorktreeMeta(
     const shouldApplyUpdate = options?.shouldApply
     const requestedHostId = options?.executionHostId
     // Why: two paired runtimes can publish one checkout as two rows with the same id and host; a
-    // caller that knows the exact row pins it so lookup, optimistic apply, and persistence agree.
+    // caller that knows the exact row pins it, by identity or, before the row has one, by runtime
+    // owner, so lookup, optimistic apply, rollback, and persistence all agree on the row.
     const requestedIdentityKey = options?.identityKey
     const requestedRuntimeOwnerEnvironmentId = options?.runtimeOwnerEnvironmentId
-    const identityMatch = findKnownWorktreeByIdentityKey(
-      get(),
-      requestedWorktreeId,
-      requestedIdentityKey
-    )
+    const isPinned = isPinnedWorktreeMetaUpdate(options)
+    const pinnedMatch = findPinnedWorktreeRow(get(), requestedWorktreeId, requestedHostId, options)
     // Why: a folder rename retires the path-derived locator while the old row is still visible; a
     // pinned write follows the identity to the row's current id so it is never persisted under
     // the retired one and never rejected as missing once the renamed row has arrived.
-    const worktreeId = identityMatch?.id ?? requestedWorktreeId
-    // Why not fall back: the locator is mutable — the row may be gone or its path reused — and local
+    const worktreeId = pinnedMatch?.id ?? requestedWorktreeId
+    // Why not fall back: the locator is mutable (the row may be gone or its path reused) and local
     // persistence carries no identity, so a fallback would stamp the value on whatever occupies the
-    // path now, or recreate metadata for a deleted workspace.
+    // path now, or recreate metadata for a deleted workspace. A pinned owner whose row is gone must
+    // not resolve to its sibling either.
     const identityGone = () => ({
       ok: false as const,
       error: translate(
@@ -56,11 +56,11 @@ export function createUpdateWorktreeMeta(
         'This workspace is no longer available.'
       )
     })
-    if (requestedIdentityKey !== undefined && !identityMatch) {
+    if (isPinned && !pinnedMatch) {
       return identityGone()
     }
     const existingWorktree =
-      identityMatch ?? findKnownWorktreeById(get(), worktreeId, requestedHostId)
+      pinnedMatch ?? findKnownWorktreeById(get(), worktreeId, requestedHostId)
     const executionHostId =
       requestedHostId ??
       existingWorktree?.hostId ??
@@ -89,8 +89,8 @@ export function createUpdateWorktreeMeta(
     // Why re-resolve: the preflight above yields, and catalog reconciliation can remove or replace
     // the pinned row meanwhile. Reusing the earlier match would let the identity-filtered reducers
     // update nothing while persistence still wrote through the mutable locator.
-    const pinnedNow = findKnownWorktreeByIdentityKey(get(), worktreeId, requestedIdentityKey)
-    if (requestedIdentityKey !== undefined && !pinnedNow) {
+    const pinnedNow = findPinnedWorktreeRow(get(), worktreeId, executionHostId, options)
+    if (isPinned && !pinnedNow) {
       return identityGone()
     }
     const worktreeForUpdate = pinnedNow ?? get().getKnownWorktreeById(worktreeId, executionHostId)
@@ -286,7 +286,8 @@ export function createUpdateWorktreeMeta(
         worktreeId,
         enriched,
         executionHostId ?? existingWorktree?.hostId,
-        requestedIdentityKey ?? worktreeForUpdate?.identity?.key
+        requestedIdentityKey ?? worktreeForUpdate?.identity?.key,
+        requestedRuntimeOwnerEnvironmentId ?? worktreeForUpdate?.runtimeOwnerEnvironmentId
       )
       refreshHostedReviewAfterMetaUpdate(get, {
         suppress: options?.suppressHostedReviewRefresh === true,

@@ -5,6 +5,8 @@ type FenceEntry = {
   executionHostId?: ExecutionHostId
   /** Canonical row identity when the writer knew it; lets two HUBs' rows for one checkout differ. */
   identityKey?: string
+  /** Runtime owner for rows that have no identity yet: the same two-HUB case before identities exist. */
+  runtimeOwnerEnvironmentId?: string
   /** Null while the write is in flight; the settle time once it has landed. */
   releasedAt: number | null
 }
@@ -37,10 +39,17 @@ export class MetaWriteFence {
   begin(
     worktreeId: string,
     executionHostId?: ExecutionHostId,
-    identityKey?: string
+    identityKey?: string,
+    runtimeOwnerEnvironmentId?: string
   ): { landed: () => void; failed: () => void } {
     this.prune()
-    const entry: FenceEntry = { worktreeId, executionHostId, identityKey, releasedAt: null }
+    const entry: FenceEntry = {
+      worktreeId,
+      executionHostId,
+      identityKey,
+      runtimeOwnerEnvironmentId,
+      releasedAt: null
+    }
     this.entries.add(entry)
     return {
       landed: () => {
@@ -60,11 +69,12 @@ export class MetaWriteFence {
     worktreeId: string,
     executionHostId?: ExecutionHostId,
     fetchStartedAt?: number,
-    identityKey?: string
+    identityKey?: string,
+    runtimeOwnerEnvironmentId?: string
   ): boolean {
     this.prune()
     for (const entry of this.entries) {
-      if (!matches(entry, worktreeId, executionHostId, identityKey)) {
+      if (!matches(entry, worktreeId, executionHostId, identityKey, runtimeOwnerEnvironmentId)) {
         continue
       }
       if (entry.releasedAt === null) {
@@ -88,19 +98,28 @@ export class MetaWriteFence {
 }
 
 // Why identity wins when both sides have one: two HUBs can publish one checkout as rows sharing id
-// and physical host, and a write for one must not fence the other's refresh. A side without an
-// identity falls back to id and host, as before.
+// and physical host, and a write for one must not fence the other's refresh. Before those rows have
+// identities the runtime owner tells them apart the same way. A side that knows neither falls back
+// to id and host, as before.
 function matches(
   entry: FenceEntry,
   worktreeId: string,
   executionHostId?: ExecutionHostId,
-  identityKey?: string
+  identityKey?: string,
+  runtimeOwnerEnvironmentId?: string
 ): boolean {
   if (entry.worktreeId !== worktreeId) {
     return false
   }
   if (entry.identityKey !== undefined && identityKey !== undefined) {
     return entry.identityKey === identityKey
+  }
+  if (
+    entry.runtimeOwnerEnvironmentId !== undefined &&
+    runtimeOwnerEnvironmentId !== undefined &&
+    entry.runtimeOwnerEnvironmentId !== runtimeOwnerEnvironmentId
+  ) {
+    return false
   }
   return (
     entry.executionHostId === undefined ||
