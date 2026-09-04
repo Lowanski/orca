@@ -233,3 +233,24 @@ describe('workspace color tag write coalescing: targets and errors', () => {
     expect(toastError).toHaveBeenCalledWith('Update the remote runtime to set workspace colors')
   })
 })
+
+describe('workspace color tag explicit targets', () => {
+  it('writes to the given targets instead of the menu selection when provided', () => {
+    const updateWorktreeMeta = vi.fn().mockResolvedValue({ ok: true })
+    const { result } = renderCommands({
+      activeContextWorktrees: [createWorktree('repo::a')],
+      updateWorktreeMeta
+    })
+
+    act(() =>
+      result.current.handleAssignColorTag('#111111', [createWorktree('repo::z', 'ssh-box')])
+    )
+
+    expect(updateWorktreeMeta).toHaveBeenCalledTimes(1)
+    expect(updateWorktreeMeta).toHaveBeenCalledWith(
+      'repo::z',
+      { colorTag: '#111111' },
+      { executionHostId: 'ssh-box' }
+    )
+  })
+})

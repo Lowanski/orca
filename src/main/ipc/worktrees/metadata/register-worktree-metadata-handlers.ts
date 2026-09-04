@@ -51,8 +51,9 @@ export function registerWorktreeMetadataHandlers(context: WorktreeIpcContext): v
         ? store.setWorktreeMetaForHost(args.worktreeId, executionHostId, sanitizedUpdates)
         : store.setWorktreeMeta(args.worktreeId, sanitizedUpdates)
       // Do NOT notify here: renderer already applied this optimistically; a notification would re-sort the sidebar (bug PR #209).
-      if (args.updates.displayName !== undefined) {
+      if (args.updates.displayName !== undefined || args.updates.colorTag !== undefined) {
         // Why: remote clients have no optimistic rename and stopped polling titles, so push a remote-only invalidation; gate on displayName so per-click isUnread updates stay event-free.
+        // colorTag rides the same gate: it is a rare explicit action like rename, and without it a paired client keeps a stale strip until an unrelated refresh.
         runtime.notifyWorktreesChangedForRemoteClients(getRepoIdFromWorktreeId(args.worktreeId))
       }
       return meta

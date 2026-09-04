@@ -9,11 +9,18 @@ import {
   WORKSPACE_COLOR_TAG_SWATCHES
 } from '../../../../shared/workspace-color-tag'
 
-/** Swatch identity: null clears the tag, `custom` opens the picker, a hex assigns directly. */
-type SwatchOption = string | null | 'custom'
+// Why a symbol: a string literal would be swallowed by `string` and the union would collapse; the
+// custom action has to stay disjoint from every hex the row can assign.
+const CUSTOM_SWATCH = Symbol('workspace-color-tag-custom')
+/** Swatch identity: null clears the tag, CUSTOM_SWATCH opens the picker, a hex assigns directly. */
+type SwatchOption = string | null | typeof CUSTOM_SWATCH
 
 // The empty slot leads and the custom wheel closes the row, so the presets read as one strip.
-const SWATCH_OPTIONS: readonly SwatchOption[] = [null, ...WORKSPACE_COLOR_TAG_SWATCHES, 'custom']
+const SWATCH_OPTIONS: readonly SwatchOption[] = [
+  null,
+  ...WORKSPACE_COLOR_TAG_SWATCHES,
+  CUSTOM_SWATCH
+]
 
 // Why inline: it is a swatch, not a token — the wheel names the picker the way the hexes name
 // themselves, and no palette entry can stand for "any color".
@@ -22,6 +29,8 @@ const CUSTOM_SWATCH_GRADIENT =
 
 type WorktreeColorTagMenuItemsProps = {
   colorTag: string | null
+  /** The selection carries more than one tag state; nothing reads as checked. */
+  mixed: boolean
   disabled: boolean
   isMultiContext: boolean
   onAssignColorTag: (colorTag: string | null) => void
@@ -33,11 +42,15 @@ function getInitialSwatchIndex(colorTag: string | null): number {
   return index === -1 ? 0 : index
 }
 
+function getSwatchKey(swatch: SwatchOption): string {
+  return swatch === CUSTOM_SWATCH ? 'custom' : (swatch ?? 'none')
+}
+
 function getSwatchLabel(swatch: SwatchOption, isSelected: boolean): string {
   if (swatch === null) {
     return translate('auto.components.sidebar.WorktreeColorTagMenuItems.noColor', 'No color')
   }
-  if (swatch === 'custom') {
+  if (swatch === CUSTOM_SWATCH) {
     return translate('auto.components.sidebar.WorktreeColorTagMenuItems.custom', 'Custom color')
   }
   return isSelected
@@ -55,6 +68,7 @@ function getSwatchLabel(swatch: SwatchOption, isSelected: boolean): string {
 
 export function WorktreeColorTagMenuItems({
   colorTag,
+  mixed,
   disabled,
   isMultiContext,
   onAssignColorTag,
@@ -64,6 +78,11 @@ export function WorktreeColorTagMenuItems({
   // Why: the row is one menu stop, so the swatch a click or Enter lands on has to
   // survive into the item's onSelect without waiting for a state re-render.
   const activeIndexRef = useRef(activeIndex)
+
+  const isSwatchSelected = useCallback(
+    (swatch: SwatchOption): boolean => !mixed && swatch !== CUSTOM_SWATCH && swatch === colorTag,
+    [colorTag, mixed]
+  )
 
   const moveActiveIndex = useCallback((index: number) => {
     const wrapped = (index + SWATCH_OPTIONS.length) % SWATCH_OPTIONS.length
@@ -87,12 +106,23 @@ export function WorktreeColorTagMenuItems({
 
   const handleSelect = useCallback(() => {
     const swatch = SWATCH_OPTIONS[activeIndexRef.current]
-    if (swatch === 'custom') {
+    if (swatch === CUSTOM_SWATCH) {
       onOpenCustomPicker()
       return
     }
     onAssignColorTag(resolveWorkspaceColorTagSelection(colorTag, swatch))
   }, [colorTag, onAssignColorTag, onOpenCustomPicker])
+
+  const groupLabel = isMultiContext
+    ? translate(
+        'auto.components.sidebar.WorktreeColorTagMenuItems.groupColorMulti',
+        'Group color for selected workspaces'
+      )
+    : translate('auto.components.sidebar.WorktreeColorTagMenuItems.groupColor', 'Group color')
+  // Why: focus stays on the row while arrows move between swatches, so the row's own name has to
+  // say which swatch Enter will activate or a screen reader hears only "Group color".
+  const activeSwatch = SWATCH_OPTIONS[activeIndex] ?? null
+  const rowLabel = `${groupLabel}: ${getSwatchLabel(activeSwatch, isSwatchSelected(activeSwatch))}`
 
   return (
     <DropdownMenuItem
@@ -100,29 +130,22 @@ export function WorktreeColorTagMenuItems({
       className="px-2 py-1.5 focus:bg-transparent dark:focus:bg-transparent"
       onSelect={handleSelect}
       onKeyDown={handleRowKeyDown}
-      aria-label={
-        isMultiContext
-          ? translate(
-              'auto.components.sidebar.WorktreeColorTagMenuItems.groupColorMulti',
-              'Group color for selected workspaces'
-            )
-          : translate('auto.components.sidebar.WorktreeColorTagMenuItems.groupColor', 'Group color')
-      }
+      aria-label={rowLabel}
     >
       <div className="flex w-full items-center justify-between gap-1" role="radiogroup">
         {SWATCH_OPTIONS.map((swatch, index) => {
-          const isSelected = swatch === colorTag
-          const isCustom = swatch === 'custom'
+          const isSelected = isSwatchSelected(swatch)
+          const isCustom = swatch === CUSTOM_SWATCH
           return (
             <button
-              key={swatch ?? 'none'}
+              key={getSwatchKey(swatch)}
               type="button"
               role={isCustom ? 'menuitem' : 'radio'}
               tabIndex={-1}
               aria-checked={isCustom ? undefined : isSelected}
               aria-haspopup={isCustom ? 'dialog' : undefined}
               aria-label={getSwatchLabel(swatch, isSelected)}
-              data-workspace-color-swatch={swatch ?? 'none'}
+              data-workspace-color-swatch={getSwatchKey(swatch)}
               onPointerEnter={() => moveActiveIndex(index)}
               onClick={() => {
                 activeIndexRef.current = index

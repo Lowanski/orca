@@ -21,9 +21,24 @@ function isOpen(picker: React.JSX.Element): boolean {
 
 const POINT = { x: 10, y: 20 }
 
+function args(
+  contextWorktrees: readonly Worktree[],
+  onAssignColorTag = vi.fn(),
+  restoreMenuFocus = vi.fn()
+) {
+  return {
+    contextWorktrees,
+    menuPoint: POINT,
+    disabled: false,
+    isMultiContext: contextWorktrees.length > 1,
+    onAssignColorTag,
+    restoreMenuFocus
+  }
+}
+
 function render(selection: readonly Worktree[], restoreMenuFocus = vi.fn()) {
   const view = renderHook(() =>
-    useWorktreeColorTagPicker(selection, POINT, vi.fn(), restoreMenuFocus)
+    useWorktreeColorTagPicker(args(selection, vi.fn(), restoreMenuFocus))
   )
   return { ...view, restoreMenuFocus }
 }
@@ -99,6 +114,40 @@ describe('workspace color tag picker handoff', () => {
 
   it('seeds the picker as untagged when the selection is mixed', () => {
     const { result } = render([worktree('#ef4444'), worktree('#22c55e')])
+    expect(result.current.sharedColorTag).toBeNull()
+  })
+})
+
+describe('workspace color tag picker selection snapshot', () => {
+  type PickerProps = { onCommitColorTag: (colorTag: string | null) => void }
+
+  // Regression: a folder row passes no selection and the menu's context set only exists while the
+  // menu is open, so a picker reading the live selection previewed and committed one workspace
+  // when several were right-clicked.
+  it('commits to the selection snapshotted when the picker opened, not the live one', () => {
+    vi.useFakeTimers()
+    const onAssign = vi.fn()
+    const first = [worktree('#111111'), worktree(null)]
+    const second = [worktree(null)]
+    const { result, rerender } = renderHook(
+      ({ selection }: { selection: readonly Worktree[] }) =>
+        useWorktreeColorTagPicker(args(selection, onAssign)),
+      { initialProps: { selection: first } }
+    )
+
+    act(() => result.current.openPicker())
+    rerender({ selection: second })
+    act(() => (result.current.picker.props as PickerProps).onCommitColorTag('#222222'))
+
+    expect(onAssign).toHaveBeenCalledWith('#222222', first)
+    vi.useRealTimers()
+  })
+
+  it('reports a mixed selection with no shared tag', () => {
+    const { result } = renderHook(() =>
+      useWorktreeColorTagPicker(args([worktree('#ef4444'), worktree(null)]))
+    )
+    expect(result.current.mixed).toBe(true)
     expect(result.current.sharedColorTag).toBeNull()
   })
 })

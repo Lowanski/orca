@@ -34,7 +34,6 @@ import { isEventTargetInsideCurrentTarget } from './worktree-card-dom-events'
 import { translate } from '@/i18n/i18n'
 import { useOptionalShortcutLabel } from '@/hooks/useShortcutLabel'
 import type { WorktreeContextMenuModel } from './use-worktree-context-menu-model'
-import { WorktreeColorTagMenuItems } from './WorktreeColorTagMenuItems'
 import { useWorktreeColorTagPicker } from './use-worktree-color-tag-picker'
 import { WorktreeStatusMenuItems } from './WorktreeStatusMenuItems'
 import { WorktreeContextMenuOverlays } from './WorktreeContextMenuOverlays'
@@ -50,6 +49,7 @@ import {
 
 export default function WorktreeContextMenuView({ model }: { model: WorktreeContextMenuModel }) {
   const {
+    activeContextWorktrees,
     batchDeleteWorktrees,
     children,
     contentClassName,
@@ -104,12 +104,14 @@ export default function WorktreeContextMenuView({ model }: { model: WorktreeCont
     workspaceStatuses
   } = model
   const deleteShortcut = useOptionalShortcutLabel('workspace.delete')
-  const colorTagPicker = useWorktreeColorTagPicker(
-    effectiveSelectedWorktrees,
+  const colorTagPicker = useWorktreeColorTagPicker({
+    contextWorktrees: activeContextWorktrees,
     menuPoint,
-    handleAssignColorTag,
-    handleCloseAutoFocus
-  )
+    disabled: deletingContext,
+    isMultiContext,
+    onAssignColorTag: handleAssignColorTag,
+    restoreMenuFocus: handleCloseAutoFocus
+  })
   return (
     <div
       ref={scopeRef}
@@ -165,14 +167,7 @@ export default function WorktreeContextMenuView({ model }: { model: WorktreeCont
           <DropdownMenuLabel className="px-2 py-1 text-[11px] font-medium text-muted-foreground">
             {translate('auto.components.sidebar.WorktreeContextMenu.workspaceSection', 'Workspace')}
           </DropdownMenuLabel>
-          <WorktreeColorTagMenuItems
-            colorTag={colorTagPicker.sharedColorTag}
-            disabled={isDeleting}
-            isMultiContext={isMultiContext}
-            onAssignColorTag={handleAssignColorTag}
-            onOpenCustomPicker={colorTagPicker.openPicker}
-          />
-          <DropdownMenuSeparator />
+          {colorTagPicker.menuItems}
           {!isMultiContext && (
             <DropdownMenuItem onSelect={handleRename} disabled={isDeleting}>
               <Pencil className="size-3.5" />

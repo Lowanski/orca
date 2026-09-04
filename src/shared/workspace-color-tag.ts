@@ -41,3 +41,12 @@ export function getSharedWorkspaceColorTag(
   const first = normalizeWorkspaceColorTag(colorTags[0])
   return colorTags.every((tag) => normalizeWorkspaceColorTag(tag) === first) ? first : null
 }
+
+/** True when the selection carries more than one distinct tag state. A mixed selection is not
+ *  "untagged" — no swatch should read as checked — but getSharedWorkspaceColorTag must still
+ *  return null for it so picking a color unifies rather than toggles off. */
+export function isMixedWorkspaceColorTagSelection(
+  colorTags: readonly (string | null | undefined)[]
+): boolean {
+  return new Set(colorTags.map((tag) => normalizeWorkspaceColorTag(tag))).size > 1
+}

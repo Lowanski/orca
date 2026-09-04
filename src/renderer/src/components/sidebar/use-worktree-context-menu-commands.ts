@@ -59,9 +59,11 @@ export function useWorktreeContextMenuCommands(args: {
     pending: { colorTag: string | null; targets: readonly Worktree[] } | null
   }>({ inFlight: false, pending: null })
   const handleAssignColorTag = useCallback(
-    (colorTag: string | null) => {
+    // Why explicit targets: the picker commits after the menu has closed, when the model's
+    // active selection has already fallen back to the clicked row.
+    (colorTag: string | null, targets: readonly Worktree[] = args.activeContextWorktrees) => {
       const state = colorTagWriteRef.current
-      state.pending = { colorTag, targets: args.activeContextWorktrees }
+      state.pending = { colorTag, targets }
       if (state.inFlight) {
         return
       }

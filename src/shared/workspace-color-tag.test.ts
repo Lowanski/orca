@@ -4,6 +4,7 @@ import {
   isPresetWorkspaceColorTag,
   normalizeWorkspaceColorTag,
   getSharedWorkspaceColorTag,
+  isMixedWorkspaceColorTagSelection,
   resolveWorkspaceColorTagSelection,
   WORKSPACE_COLOR_TAG_SWATCHES
 } from './workspace-color-tag'
@@ -91,5 +92,26 @@ describe('getSharedWorkspaceColorTag', () => {
 
   it('drops unusable stored values rather than treating them as a distinct tag', () => {
     expect(getSharedWorkspaceColorTag(['not-a-color', null])).toBeNull()
+  })
+})
+
+describe('isMixedWorkspaceColorTagSelection', () => {
+  it('is mixed when the selection holds more than one tag state', () => {
+    expect(isMixedWorkspaceColorTagSelection(['#ef4444', '#22c55e'])).toBe(true)
+    expect(isMixedWorkspaceColorTagSelection(['#ef4444', null])).toBe(true)
+    expect(isMixedWorkspaceColorTagSelection(['#ef4444', undefined])).toBe(true)
+  })
+
+  it('is not mixed for a uniform, untagged, or empty selection', () => {
+    expect(isMixedWorkspaceColorTagSelection(['#ef4444', '#EF4444'])).toBe(false)
+    expect(isMixedWorkspaceColorTagSelection([null, undefined])).toBe(false)
+    expect(isMixedWorkspaceColorTagSelection([])).toBe(false)
+  })
+
+  // Why both hold at once: mixed must show nothing checked, yet picking a color must unify.
+  it('reads as mixed while the shared tag still reports null', () => {
+    const tags = ['#ef4444', '#22c55e']
+    expect(isMixedWorkspaceColorTagSelection(tags)).toBe(true)
+    expect(getSharedWorkspaceColorTag(tags)).toBeNull()
   })
 })
