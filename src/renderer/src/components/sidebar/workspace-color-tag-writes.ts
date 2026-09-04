@@ -52,6 +52,8 @@ type IdentityQueue = {
   previewOwner: WorkspaceColorTagPreviewOwner
   /** The pre-identity key this queue answers to; handed to a surviving queue for the same path on drain. */
   fallbackKey: string
+  /** Creation order; a draining queue hands its alias only to a newer occupant, never an older one. */
+  sequence: number
 }
 
 /**
@@ -64,6 +66,7 @@ type IdentityQueue = {
  * lands. Nothing here touches the store directly — the writer is injected.
  */
 const queues = new Map<string, IdentityQueue>()
+let nextQueueSequence = 0
 
 /**
  * Assign `colorTag` to every target. Resolves once each target's write — or a newer one that
@@ -152,7 +155,8 @@ function queueFor(worktree: Worktree): IdentityQueue {
     canonicalRow: canonical === undefined ? undefined : worktree,
     previewIdentities: new Set(),
     previewOwner: createWorkspaceColorTagPreviewOwner(),
-    fallbackKey: fallback
+    fallbackKey: fallback,
+    sequence: ++nextQueueSequence
   }
   queues.set(identity, queue)
   // Why the newest occupant owns the pre-identity key: a checkout replaced at the same path while
@@ -178,9 +182,12 @@ function drain(queue: IdentityQueue, write: WorkspaceColorTagWriter): void {
     // Why rebind: two occupants of one path can share the fallback key for a moment (a checkout
     // replaced while its predecessor's write is pending). Once the predecessor is gone, a copy that
     // still addresses the row without an identity must join the survivor, not open a third queue.
+    // Only a newer occupant qualifies: when the replacement finishes first, its predecessor must not
+    // inherit the key and pin later writes to a row on its way out.
     if (!queues.has(queue.fallbackKey)) {
       const survivor = [...new Set(queues.values())].find(
-        (registered) => registered.fallbackKey === queue.fallbackKey
+        (registered) =>
+          registered.fallbackKey === queue.fallbackKey && registered.sequence > queue.sequence
       )
       if (survivor) {
         queues.set(queue.fallbackKey, survivor)

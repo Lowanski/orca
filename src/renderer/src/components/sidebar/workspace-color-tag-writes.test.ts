@@ -25,6 +25,7 @@ function deferredWriter() {
   return {
     write,
     settleNext: () => resolvers.shift()?.(),
+    settleAt: (index: number) => resolvers.splice(index, 1)[0]?.(),
     settleAll: () => {
       for (const resolve of resolvers.splice(0)) {
         resolve()
@@ -296,6 +297,29 @@ describe('assignWorkspaceColorTags', () => {
     await flush()
     expect(write).toHaveBeenCalledTimes(3)
     expect(write.mock.calls[2]?.[2]).toMatchObject({ identityKey: 'k-new3' })
+    settleAll()
+  })
+
+  // Regression: when the replacement's queue finished first, the drain handed the pre-identity alias
+  // to the only survivor, the predecessor, and a later identity-less write was pinned to the old row.
+  it('never hands the fallback alias back to an older occupant', async () => {
+    const { write, settleAt, settleAll } = deferredWriter()
+    const old = {
+      id: 'repl::t',
+      hostId: 'ssh:box',
+      identity: { key: 'k-old4' }
+    } as unknown as Worktree
+    const replacement = { ...old, identity: { key: 'k-new4' } } as unknown as Worktree
+    const copy = { id: 'repl::t', hostId: 'ssh:box' } as unknown as Worktree
+
+    void assignWorkspaceColorTags([old], '#111111', write, vi.fn())
+    void assignWorkspaceColorTags([replacement], '#222222', write, vi.fn())
+    settleAt(1)
+    await flush()
+
+    void assignWorkspaceColorTags([copy], '#333333', write, vi.fn())
+    expect(write).toHaveBeenCalledTimes(3)
+    expect(write.mock.calls[2]?.[2]?.identityKey).toBeUndefined()
     settleAll()
   })
 

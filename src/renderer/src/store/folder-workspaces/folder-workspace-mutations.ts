@@ -12,6 +12,8 @@ import {
   getActiveRuntimeTarget
 } from '../../runtime/runtime-rpc-client'
 import { folderWorkspaceKey } from '../../../../shared/workspace-scope'
+import { normalizeWorkspaceColorTag } from '../../../../shared/workspace-color-tag'
+import { folderColorTagWriteFence } from './folder-workspace-color-tag-fence'
 import { formatFolderWorkspaceCreateError } from '../../lib/folder-workspace-path-status'
 import {
   findFolderWorkspaceOwner,
@@ -155,6 +157,17 @@ export function createFolderWorkspaceMutationActions(
         updateIdentity,
         Object.keys(updates) as FolderWorkspaceUpdateField[]
       )
+      // Why: the folder catalog merges wholesale, so a listing captured before this write and merged
+      // after it would restore the old color; the fence holds such a listing and refetches once.
+      const colorFence =
+        'colorTag' in updates
+          ? folderColorTagWriteFence.begin(folderWorkspaceId, ownerHostId, undefined, undefined, {
+              written: normalizeWorkspaceColorTag(updates.colorTag),
+              onHeldListing: () => {
+                void get().fetchFolderWorkspaces({ runtimeEnvironmentId })
+              }
+            })
+          : undefined
       try {
         const updated =
           target.kind === 'local'
@@ -168,6 +181,7 @@ export function createFolderWorkspaceMutationActions(
                 )
               ).folderWorkspace
         if (!updated) {
+          colorFence?.failed()
           await reconcileFailedFolderWorkspaceUpdate({
             target,
             folderWorkspaceId,
@@ -182,6 +196,7 @@ export function createFolderWorkspaceMutationActions(
         }
         if (updates.diffComments !== undefined && updated.diffComments === undefined) {
           // Why: older paired runtimes strip this optional field; reconcile instead of showing an unsaved note.
+          colorFence?.failed()
           await reconcileFailedFolderWorkspaceUpdate({
             target,
             folderWorkspaceId,
@@ -211,9 +226,11 @@ export function createFolderWorkspaceMutationActions(
               : {})
           }))
         }
+        colorFence?.landed()
         return true
       } catch (err) {
         console.error('Failed to update folder workspace:', err)
+        colorFence?.failed()
         await reconcileFailedFolderWorkspaceUpdate({
           target,
           folderWorkspaceId,

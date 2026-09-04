@@ -69,6 +69,7 @@ export function useWorktreeColorTagPicker({
   picker: React.JSX.Element
 } {
   const [open, setOpen] = useState(false)
+  const openRef = useRef(false)
   // Why snapshot: the menu's selection only exists while the menu is open. Once it closes the
   // model falls back to the clicked row, and a folder row passes no selection at all, so the
   // picker would preview and commit a single workspace when the user right-clicked several.
@@ -104,6 +105,37 @@ export function useWorktreeColorTagPicker({
     }
   }, [])
 
+  useEffect(() => {
+    openRef.current = open
+  }, [open])
+
+  // Why the timer: the superseded surface's close-auto-focus usually arrives within its exit
+  // animation; if it never does, the flag must not skip a later, unrelated close's focus restore.
+  const markSuperseded = useCallback(() => {
+    cancelledRef.current = true
+    if (cancelledTimerRef.current != null) {
+      window.clearTimeout(cancelledTimerRef.current)
+    }
+    cancelledTimerRef.current = window.setTimeout(() => {
+      cancelledTimerRef.current = null
+      cancelledRef.current = false
+    }, CLOSE_AUTO_FOCUS_FALLBACK_MS)
+  }, [])
+
+  // Why no restore: the menu that superseded this surface is open now, and focusing the sidebar
+  // would be a focus-outside for it, dismissing it on arrival.
+  const restoreFocusUnlessSuperseded = useCallback(
+    (event: Event): void => {
+      if (cancelledRef.current) {
+        cancelledRef.current = false
+        event.preventDefault()
+        return
+      }
+      restoreMenuFocus(event)
+    },
+    [restoreMenuFocus]
+  )
+
   useEffect(
     () => () => {
       clearFallback()
@@ -114,34 +146,6 @@ export function useWorktreeColorTagPicker({
     },
     [clearFallback, clearInactiveTimer]
   )
-
-  // Why: a right-click on another card during this menu's exit animation opens a new menu and
-  // broadcasts close-all, but the handoff would still open this picker over that menu with the old
-  // selection as its targets. Superseded means cancelled.
-  useEffect(() => {
-    const cancelPending = (): void => {
-      if (!pendingRef.current) {
-        return
-      }
-      pendingRef.current = false
-      clearFallback()
-      setSnapshot(null)
-      clearInactiveTimer()
-      onActiveChange(false)
-      // Why the timer: the old menu's close-auto-focus usually arrives within its exit animation; if
-      // it never does, the flag must not skip a later, unrelated close's focus restore.
-      cancelledRef.current = true
-      if (cancelledTimerRef.current != null) {
-        window.clearTimeout(cancelledTimerRef.current)
-      }
-      cancelledTimerRef.current = window.setTimeout(() => {
-        cancelledTimerRef.current = null
-        cancelledRef.current = false
-      }, CLOSE_AUTO_FOCUS_FALLBACK_MS)
-    }
-    window.addEventListener(CLOSE_ALL_CONTEXT_MENUS_EVENT, cancelPending)
-    return () => window.removeEventListener(CLOSE_ALL_CONTEXT_MENUS_EVENT, cancelPending)
-  }, [clearFallback, clearInactiveTimer, onActiveChange])
 
   const openPicker = useCallback(() => {
     setSnapshot(contextWorktrees)
@@ -154,15 +158,8 @@ export function useWorktreeColorTagPicker({
 
   const handleMenuCloseAutoFocus = useCallback(
     (event: Event): void => {
-      if (cancelledRef.current) {
-        // Why no restore: the menu that superseded this one is open now, and focusing the sidebar
-        // would be a focus-outside for it, dismissing it on arrival.
-        cancelledRef.current = false
-        event.preventDefault()
-        return
-      }
       if (!pendingRef.current) {
-        restoreMenuFocus(event)
+        restoreFocusUnlessSuperseded(event)
         return
       }
       // Why preventDefault and no focus restore: sending focus to the sidebar here is a
@@ -170,7 +167,7 @@ export function useWorktreeColorTagPicker({
       event.preventDefault()
       window.setTimeout(flushPendingOpen, 0)
     },
-    [flushPendingOpen, restoreMenuFocus]
+    [flushPendingOpen, restoreFocusUnlessSuperseded]
   )
 
   const handleOpenChange = useCallback(
@@ -190,6 +187,31 @@ export function useWorktreeColorTagPicker({
     },
     [clearInactiveTimer, onActiveChange]
   )
+
+  // Why: a right-click on another card during this menu's exit animation opens a new menu and
+  // broadcasts close-all, but the handoff would still open this picker over that menu with the old
+  // selection as its targets. Superseded means cancelled. An already-open picker is cancelled too:
+  // a keyboard or synthetic context-menu open has no pointer-down outside to dismiss the popover,
+  // and Radix would otherwise commit the draft and restore focus under the new menu.
+  useEffect(() => {
+    const cancelSuperseded = (): void => {
+      if (pendingRef.current) {
+        pendingRef.current = false
+        clearFallback()
+        setSnapshot(null)
+        clearInactiveTimer()
+        onActiveChange(false)
+        markSuperseded()
+        return
+      }
+      if (openRef.current) {
+        markSuperseded()
+        handleOpenChange(false)
+      }
+    }
+    window.addEventListener(CLOSE_ALL_CONTEXT_MENUS_EVENT, cancelSuperseded)
+    return () => window.removeEventListener(CLOSE_ALL_CONTEXT_MENUS_EVENT, cancelSuperseded)
+  }, [clearFallback, clearInactiveTimer, handleOpenChange, markSuperseded, onActiveChange])
 
   // Why three sources: a write in flight shows on the card through the preview channel before the
   // store changes; once it lands the preview clears, but the menu's rows are a snapshot taken when
@@ -245,7 +267,7 @@ export function useWorktreeColorTagPicker({
         previewIdentities={previewIdentities}
         onOpenChange={handleOpenChange}
         onCommitColorTag={commitPickerColorTag}
-        onRestoreFocus={restoreMenuFocus}
+        onRestoreFocus={restoreFocusUnlessSuperseded}
       />
     )
   }

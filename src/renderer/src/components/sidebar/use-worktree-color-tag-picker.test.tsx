@@ -137,6 +137,39 @@ describe('workspace color tag picker handoff', () => {
     expect(restoreMenuFocus).toHaveBeenCalledWith(next)
   })
 
+  // Regression: once the picker was open, a later close-all was ignored; a keyboard or synthetic
+  // context-menu open has no pointer-down outside, so Radix later committed the draft and restored
+  // focus under the new menu.
+  it('closes an already-open picker, without a focus restore, when another context menu opens', () => {
+    vi.useFakeTimers()
+    const onActiveChange = vi.fn()
+    const restoreMenuFocus = vi.fn()
+    const { result, rerender } = renderHook(() =>
+      useWorktreeColorTagPicker(args([worktree(null)], vi.fn(), restoreMenuFocus, onActiveChange))
+    )
+    act(() => result.current.openPicker())
+    act(() => result.current.handleMenuCloseAutoFocus(new Event('x', { cancelable: true })))
+    act(() => vi.advanceTimersByTime(0))
+    rerender()
+    expect(isOpen(result.current.picker)).toBe(true)
+
+    act(() => {
+      window.dispatchEvent(new Event(CLOSE_ALL_CONTEXT_MENUS_EVENT))
+    })
+    rerender()
+    expect(isOpen(result.current.picker)).toBe(false)
+    const restore = new Event('r', { cancelable: true })
+    act(() =>
+      (result.current.picker.props as { onRestoreFocus: (e: Event) => void }).onRestoreFocus(
+        restore
+      )
+    )
+    expect(restoreMenuFocus).not.toHaveBeenCalled()
+    expect(restore.defaultPrevented).toBe(true)
+    act(() => vi.advanceTimersByTime(500))
+    expect(onActiveChange).toHaveBeenLastCalledWith(false)
+  })
+
   it('forgets a cancelled handoff once the close-auto-focus window has passed', () => {
     vi.useFakeTimers()
     const { result, restoreMenuFocus } = render([worktree(null)])
