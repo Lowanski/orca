@@ -159,6 +159,62 @@ describe('identity-pinned writes across a rename during the preflight yield', ()
   })
 })
 
+describe('identity-pinned writes across a rename while the write is failing', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetRemoteRuntimeMocks()
+  })
+
+  // Regression: the rollback found the renamed row by identity but addressed the reducers with the
+  // id the write started under, so nothing was reverted and the unsaved color stayed on the card.
+  it('rolls the renamed row back under its current id when recovery cannot refresh', async () => {
+    const store = createTestStore()
+    const before = makeWorktree({
+      id: 'repo1::/path/failing-before',
+      repoId: 'repo1',
+      path: '/path/failing-before',
+      identity: { key: 'k-fail' } as never,
+      colorTag: null
+    })
+    let rejectWrite: (error: Error) => void = () => undefined
+    mockApi.worktrees.updateMeta.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectWrite = reject
+        })
+    )
+    store.setState({
+      worktreesByRepo: { repo1: [before] },
+      fetchWorktrees: vi.fn().mockResolvedValue(false)
+    } as unknown as Partial<AppState>)
+
+    const pending = store
+      .getState()
+      .updateWorktreeMeta(before.id, { colorTag: '#ef4444' }, { identityKey: 'k-fail' })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(store.getState().worktreesByRepo.repo1[0]?.colorTag).toBe('#ef4444')
+    // Reconciliation renames the row, carrying the optimistic color, while the write is failing.
+    store.setState({
+      worktreesByRepo: {
+        repo1: [
+          {
+            ...before,
+            id: 'repo1::/path/failing-after',
+            path: '/path/failing-after',
+            colorTag: '#ef4444'
+          }
+        ]
+      }
+    } as Partial<AppState>)
+    rejectWrite(new Error('host away'))
+    const result = await pending
+
+    expect(result.ok).toBe(false)
+    expect(store.getState().worktreesByRepo.repo1[0]?.id).toBe('repo1::/path/failing-after')
+    expect(store.getState().worktreesByRepo.repo1[0]?.colorTag).toBeNull()
+  })
+})
+
 describe('runtime-owner pins on folder workspaces', () => {
   beforeEach(() => {
     vi.clearAllMocks()

@@ -54,13 +54,16 @@ export function createFailedPersistRecovery(args: FailedPersistRecoveryArgs): ()
       const row =
         findPinnedWorktreeRow(s, args.worktreeId, args.executionHostId, args.pin) ??
         findKnownWorktreeById(s, args.worktreeId, args.executionHostId)
-      if (normalizeWorkspaceColorTag(row?.colorTag) !== optimistic) {
+      if (!row || normalizeWorkspaceColorTag(row.colorTag) !== optimistic) {
         return {}
       }
+      // Why the row's id: a rename can land while the write is failing, and the reducers match ids
+      // exactly; rolling back under the id the write started with would then revert nothing.
+      const rollbackId = row.id
       return {
         worktreesByRepo: applyWorktreeUpdates(
           s.worktreesByRepo,
-          args.worktreeId,
+          rollbackId,
           { colorTag: args.priorColorTag },
           args.executionHostId,
           args.pin?.identityKey,
@@ -68,7 +71,7 @@ export function createFailedPersistRecovery(args: FailedPersistRecoveryArgs): ()
         ),
         detectedWorktreesByRepo: applyDetectedWorktreeUpdates(
           s.detectedWorktreesByRepo,
-          args.worktreeId,
+          rollbackId,
           { colorTag: args.priorColorTag },
           args.executionHostId,
           args.pin?.identityKey,
