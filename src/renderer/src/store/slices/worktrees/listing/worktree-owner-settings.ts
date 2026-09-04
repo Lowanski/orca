@@ -98,6 +98,18 @@ export function settingsForRuntimeEnvironmentOwner(
     : ({ activeRuntimeEnvironmentId: environmentId } as AppState['settings'])
 }
 
+/**
+ * Settings that route through the desktop's own provider (local or direct SSH), never a paired
+ * runtime. Why: an identity-pinned row without a runtime owner is one the desktop lists itself, and
+ * the id-and-host owner guess would otherwise hand its identity selector to a HUB that also proxies
+ * the same checkout — which the HUB rejects.
+ */
+export function settingsForDirectOwner(settings: AppState['settings']): AppState['settings'] {
+  return settings
+    ? { ...settings, activeRuntimeEnvironmentId: null }
+    : ({ activeRuntimeEnvironmentId: null } as AppState['settings'])
+}
+
 export function trySettingsForWorktreeOwner(
   state: Pick<
     AppState,

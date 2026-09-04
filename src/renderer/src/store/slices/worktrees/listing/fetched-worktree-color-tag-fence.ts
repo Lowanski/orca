@@ -66,3 +66,20 @@ export function fenceStartedAt(args: FencedWorktreeMergeArgs): number | undefine
   }
   return Math.min(scan, caller)
 }
+
+/**
+ * Visible rows plus any detected-only rows for the same repository. Why: a workspace that exists
+ * only in the detected catalog — a hidden external worktree colored from the Agent Map — has no
+ * row in the visible list, so a fence fed only that list cannot find it and lets a stale listing
+ * undo its assignment.
+ */
+export function withDetectedOnlyRows(
+  visible: readonly Worktree[] | undefined,
+  detected: readonly Worktree[] | undefined
+): readonly Worktree[] | undefined {
+  if (!detected || detected.length === 0) {
+    return visible
+  }
+  const seen = new Set((visible ?? []).map((worktree) => worktree.id))
+  return [...(visible ?? []), ...detected.filter((worktree) => !seen.has(worktree.id))]
+}

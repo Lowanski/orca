@@ -37,6 +37,7 @@ export function createFetchWorktrees(
     try {
       const ownerState = get()
       const requestStartedWorktrees = ownerState.worktreesByRepo[repoId]
+      const requestStartedDetectedWorktrees = ownerState.detectedWorktreesByRepo[repoId]?.worktrees
       const requestStartedAt = Date.now()
       const repoOwners = ownerState.repos.filter((repo) => repo.id === repoId)
       const ownerWasMissingAtStart = repoOwners.length === 0
@@ -100,6 +101,7 @@ export function createFetchWorktrees(
             ? ownerState.repos
             : undefined,
         requestStartedWorktrees,
+        requestStartedDetectedWorktrees,
         requestStartedAt,
         setup,
         refresh

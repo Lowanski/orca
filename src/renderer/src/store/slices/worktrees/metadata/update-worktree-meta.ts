@@ -1,5 +1,3 @@
-import { toRuntimeExecutionHostId } from '../../../../../../shared/execution-host'
-import type { Worktree } from '../../../../../../shared/worktree/types'
 import type { WorktreeSlice } from '../../worktree-helpers'
 import type { WorktreeSliceGet, WorktreeSliceSet } from '../listing/worktree-slice-types'
 import { translate } from '@/i18n/i18n'
@@ -20,14 +18,12 @@ import {
 } from './hosted-review-link-mutation'
 import { normalizeHostedReviewLinkReplacementUpdates } from './hosted-review-link-update-normalization'
 import { persistWorktreeMeta } from './worktree-meta-persist'
+import { resolvePinnedOwnerRouting } from './pinned-worktree-owner-routing'
 import { refreshHostedReviewAfterMetaUpdate } from './hosted-review-refresh-after-meta-update'
 import { resolveHostedReviewPushTargetUpdate } from './hosted-review-push-target-resolution'
 import { updateFolderWorkspaceMeta } from './update-folder-workspace-meta'
 import { isRuntimeSelectorNotFoundError } from '../listing/runtime-worktree-rpc-errors'
-import {
-  settingsForRuntimeEnvironmentOwner,
-  settingsForWorktreeOwner
-} from '../listing/worktree-owner-settings'
+import { settingsForWorktreeOwner } from '../listing/worktree-owner-settings'
 
 import { findRepoForHost } from '../../repo-host-identity'
 export function createUpdateWorktreeMeta(
@@ -236,17 +232,12 @@ export function createUpdateWorktreeMeta(
       bumpHostedReviewLinkMutationGeneration(worktreeId)
     }
 
-    // Why: an identity-pinned row names its own paired runtime; the id-and-host owner lookup could
-    // pick a sibling HUB or local and the pinned HUB would never persist the write. Recovery after a
-    // failure must follow the same owner, or the failed optimistic value stays on screen.
-    const pinnedOwnerEnvironmentId =
-      requestedIdentityKey !== undefined
-        ? (worktreeForUpdate as Partial<Pick<Worktree, 'runtimeOwnerEnvironmentId'>> | undefined)
-            ?.runtimeOwnerEnvironmentId
-        : undefined
-    const recoveryFetchOptions = pinnedOwnerEnvironmentId
-      ? { executionHostId: toRuntimeExecutionHostId(pinnedOwnerEnvironmentId) }
-      : undefined
+    const { pinnedSettings, recoveryFetchOptions } = resolvePinnedOwnerRouting(
+      get().settings,
+      requestedIdentityKey,
+      worktreeForUpdate,
+      executionHostId
+    )
     // Why await and roll back: a write that failed because its host is away usually cannot refresh
     // either, and fetchWorktrees then just returns false. Left alone, the optimistic color would
     // stay on the card after the picker has already reported the failure. Scoped to colorTag: it
@@ -285,9 +276,7 @@ export function createUpdateWorktreeMeta(
     }
     try {
       await persistWorktreeMeta(
-        pinnedOwnerEnvironmentId
-          ? settingsForRuntimeEnvironmentOwner(get().settings, pinnedOwnerEnvironmentId)
-          : settingsForWorktreeOwner(get(), worktreeId, executionHostId),
+        pinnedSettings ?? settingsForWorktreeOwner(get(), worktreeId, executionHostId),
         worktreeId,
         enriched,
         executionHostId ?? existingWorktree?.hostId,

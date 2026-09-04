@@ -20,7 +20,11 @@ import {
 import { isCurrentDetectedWorktreeRefresh } from './detected-worktree-refresh-admission'
 import { buildWorktreePurgeState } from '../teardown/worktree-purge-state'
 import { isDisplayNamePersistencePending } from '../metadata/worktree-meta-persist'
-import { fenceStartedAt, preserveConcurrentColorTag } from './fetched-worktree-color-tag-fence'
+import {
+  fenceStartedAt,
+  preserveConcurrentColorTag,
+  withDetectedOnlyRows
+} from './fetched-worktree-color-tag-fence'
 import { branchName } from '@/lib/git-utils'
 import {
   forgetAuthoritativelyRemovedWorktrees,
@@ -161,8 +165,8 @@ export function mergeFetchedWorktrees(
             currentWorktrees,
             (worktree) => worktreeMatchesHost(worktree, args.hostId, matchOptions)
           ),
-          args.requestStartedWorktrees,
-          currentWorktrees,
+          withDetectedOnlyRows(args.requestStartedWorktrees, args.requestStartedDetectedWorktrees),
+          withDetectedOnlyRows(currentWorktrees, s.detectedWorktreesByRepo[args.repoId]?.worktrees),
           (worktree) => worktreeMatchesHost(worktree, args.hostId, matchOptions),
           fenceStartedAt(args)
         ),

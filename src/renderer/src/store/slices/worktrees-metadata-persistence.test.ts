@@ -737,3 +737,72 @@ describe('identity-pinned writes across a folder rename', () => {
     expect(JSON.stringify(mockApi.worktrees.updateMeta.mock.calls[0])).not.toContain('/path/before')
   })
 })
+
+describe('identity-pinned writes for rows the desktop lists itself', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetRemoteRuntimeMocks()
+  })
+
+  // Regression: the same SSH checkout listed directly by the desktop and through one HUB. The
+  // direct row has an identity but no runtime owner, so routing fell back to the id-and-host
+  // resolver, which picked the HUB and sent it the desktop row's identity selector.
+  it('routes a pinned direct-SSH row through the desktop, not the focused HUB', async () => {
+    const store = createTestStore()
+    const direct = makeWorktree({
+      id: 'repo1::/srv/checkout',
+      repoId: 'repo1',
+      path: '/srv/checkout',
+      hostId: 'ssh:box' as never,
+      identity: { key: 'k-direct' } as never,
+      colorTag: null
+    })
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-hub' } as never,
+      worktreesByRepo: { repo1: [direct] }
+    } as Partial<AppState>)
+
+    await store
+      .getState()
+      .updateWorktreeMeta(
+        direct.id,
+        { colorTag: '#ef4444' },
+        { identityKey: 'k-direct', executionHostId: 'ssh:box' as never }
+      )
+
+    expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
+    expect(mockApi.worktrees.updateMeta).toHaveBeenCalledTimes(1)
+    expect(store.getState().worktreesByRepo.repo1[0]?.colorTag).toBe('#ef4444')
+  })
+
+  it('scopes recovery for a failed pinned direct-SSH write to that host', async () => {
+    const store = createTestStore()
+    const direct = makeWorktree({
+      id: 'repo1::/srv/away',
+      repoId: 'repo1',
+      path: '/srv/away',
+      hostId: 'ssh:box' as never,
+      identity: { key: 'k-away' } as never,
+      colorTag: null
+    })
+    mockApi.worktrees.updateMeta.mockRejectedValueOnce(new Error('ssh away'))
+    const fetchWorktrees = vi.fn().mockResolvedValue(false)
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-hub' } as never,
+      worktreesByRepo: { repo1: [direct] },
+      fetchWorktrees
+    } as unknown as Partial<AppState>)
+
+    const result = await store
+      .getState()
+      .updateWorktreeMeta(
+        direct.id,
+        { colorTag: '#ef4444' },
+        { identityKey: 'k-away', executionHostId: 'ssh:box' as never }
+      )
+
+    expect(result.ok).toBe(false)
+    expect(fetchWorktrees).toHaveBeenCalledWith('repo1', { executionHostId: 'ssh:box' })
+    expect(store.getState().worktreesByRepo.repo1[0]?.colorTag).toBeNull()
+  })
+})

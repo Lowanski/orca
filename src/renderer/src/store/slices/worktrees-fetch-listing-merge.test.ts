@@ -396,6 +396,39 @@ describe('fetchWorktrees', () => {
     ])
   })
 
+  // Regression: the fences only saw worktreesByRepo, so a workspace present only in the detected
+  // catalog — a hidden external worktree colored from the Agent Map — had a successful assignment
+  // reverted by a listing that was already in flight.
+  it('fences a color write on a detected-only workspace against an in-flight listing', async () => {
+    const store = createTestStore()
+    const hidden = makeWorktree({
+      id: 'repo1::/path/hidden',
+      repoId: 'repo1',
+      path: '/path/hidden',
+      colorTag: null
+    })
+    let resolveListing!: (worktrees: Worktree[]) => void
+    const listing = new Promise<Worktree[]>((resolve) => {
+      resolveListing = resolve
+    })
+    worktreeListMock.mockReturnValueOnce(listing)
+    store.setState({
+      worktreesByRepo: { repo1: [] },
+      detectedWorktreesByRepo: { repo1: makeDetectedResult('repo1', [hidden]) }
+    } as Partial<AppState>)
+
+    const refresh = store.getState().fetchWorktrees('repo1')
+    await vi.waitFor(() => expect(worktreeListMock).toHaveBeenCalledTimes(1))
+    await store.getState().updateWorktreeMeta(hidden.id, { colorTag: '#ef4444' })
+    expect(store.getState().detectedWorktreesByRepo.repo1.worktrees[0]?.colorTag).toBe('#ef4444')
+    resolveListing([{ ...hidden, head: 'def456' }])
+
+    await refresh
+
+    expect(store.getState().detectedWorktreesByRepo.repo1.worktrees[0]?.colorTag).toBe('#ef4444')
+    expect(store.getState().worktreesByRepo.repo1[0]?.colorTag).toBe('#ef4444')
+  })
+
   it('does not merge a stale display name over a rename completed during refresh', async () => {
     const store = createTestStore()
     const worktreeId = 'repo1::/path/wt1'
