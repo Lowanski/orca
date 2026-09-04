@@ -12,14 +12,19 @@ import { getFolderWorkspaceHostId } from './folder-workspace-catalog'
  */
 export const folderColorTagWriteFence = new MetaWriteFence()
 
-/** Keeps the current color of any merged row whose write the listing predates. */
+/**
+ * Keeps the current color of any merged row whose write the listing predates. Returns `merged`
+ * itself when nothing is held: the catalog actions compare the array by reference to decide whether
+ * a refetch changed anything.
+ */
 export function preserveFencedFolderColorTags(
   merged: readonly FolderWorkspace[],
   previous: readonly FolderWorkspace[],
   projectGroups: readonly ProjectGroup[],
   fetchStartedAt: number
-): FolderWorkspace[] {
-  return merged.map((workspace) => {
+): readonly FolderWorkspace[] {
+  let result: FolderWorkspace[] | undefined
+  merged.forEach((workspace, index) => {
     const hostId = getFolderWorkspaceHostId(workspace, projectGroups)
     const current = previous.find(
       (candidate) =>
@@ -27,21 +32,25 @@ export function preserveFencedFolderColorTags(
         getFolderWorkspaceHostId(candidate, projectGroups) === hostId
     )
     if (!current) {
-      return workspace
+      return
     }
     const incoming = normalizeWorkspaceColorTag(workspace.colorTag)
     if (incoming === normalizeWorkspaceColorTag(current.colorTag)) {
-      return workspace
+      return
     }
-    return folderColorTagWriteFence.isPending(
-      workspace.id,
-      hostId,
-      fetchStartedAt,
-      undefined,
-      undefined,
-      incoming
-    )
-      ? { ...workspace, colorTag: current.colorTag }
-      : workspace
+    if (
+      folderColorTagWriteFence.isPending(
+        workspace.id,
+        hostId,
+        fetchStartedAt,
+        undefined,
+        undefined,
+        incoming
+      )
+    ) {
+      result ??= [...merged]
+      result[index] = { ...workspace, colorTag: current.colorTag }
+    }
   })
+  return result ?? merged
 }

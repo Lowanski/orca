@@ -323,6 +323,52 @@ describe('assignWorkspaceColorTags', () => {
     settleAll()
   })
 
+  // Regression: with three occupants of one path, the newest draining first and then the oldest let
+  // the superseded intermediate reclaim the alias, and a later identity-less write was pinned to it.
+  it('lets only the latest claimant take the fallback alias back', async () => {
+    const { write, settleAt, settleAll } = deferredWriter()
+    const first = {
+      id: 'repl::s',
+      hostId: 'ssh:box',
+      identity: { key: 'k-a6' }
+    } as unknown as Worktree
+    const second = { ...first, identity: { key: 'k-b6' } } as unknown as Worktree
+    const third = { ...first, identity: { key: 'k-c6' } } as unknown as Worktree
+    const copy = { id: 'repl::s', hostId: 'ssh:box' } as unknown as Worktree
+
+    void assignWorkspaceColorTags([first], '#111111', write, vi.fn())
+    void assignWorkspaceColorTags([second], '#222222', write, vi.fn())
+    void assignWorkspaceColorTags([third], '#333333', write, vi.fn())
+    settleAt(2)
+    await flush()
+    settleAt(0)
+    await flush()
+
+    void assignWorkspaceColorTags([copy], '#444444', write, vi.fn())
+    expect(write).toHaveBeenCalledTimes(4)
+    expect(write.mock.calls[3]?.[2]?.identityKey).toBeUndefined()
+    settleAll()
+  })
+
+  // Regression: the predecessor's pending preview leaked onto a checkout that replaced it at the
+  // same path, because the fallback layer carried no notion of which occupant set it.
+  it("keeps a predecessor's pending preview off a replacement row", () => {
+    const { write, settleAll } = deferredWriter()
+    const old = {
+      id: 'repl::q',
+      hostId: 'ssh:box',
+      identity: { key: 'k-old7' }
+    } as unknown as Worktree
+    const replacement = { ...old, identity: { key: 'k-new7' } } as unknown as Worktree
+    const copy = { id: 'repl::q', hostId: 'ssh:box' } as unknown as Worktree
+
+    void assignWorkspaceColorTags([old], '#111111', write, vi.fn())
+    expect(readWorkspaceColorTagPreview(old)).toBe('#111111')
+    expect(readWorkspaceColorTagPreview(copy)).toBe('#111111')
+    expect(readWorkspaceColorTagPreview(replacement)).toBeUndefined()
+    settleAll()
+  })
+
   // Regression: an identity-less direct-SSH row was written with no pin at all, so the reducers
   // recolored a HUB-proxied sibling too and the owner guess could persist through the HUB.
   it('pins a desktop-listed row with an explicit null owner', () => {

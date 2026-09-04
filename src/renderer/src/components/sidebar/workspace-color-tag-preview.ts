@@ -32,7 +32,17 @@ export function createWorkspaceColorTagPreviewOwner(): WorkspaceColorTagPreviewO
 type PreviewedWorktree = Pick<Worktree, 'id' | 'hostId' | 'identity' | 'runtimeOwnerEnvironmentId'>
 
 /** A previewed `null` is "no color", as distinct from `undefined`, "nothing previewed". */
-type PreviewLayer = { colorTag: string | null; owner: WorkspaceColorTagPreviewOwner }
+type PreviewLayer = {
+  colorTag: string | null
+  owner: WorkspaceColorTagPreviewOwner
+  /** The canonical identity this layer was set on behalf of, when a fallback-key layer knows it. */
+  forIdentity?: string
+}
+
+export type WorkspaceColorTagPreviewScope = {
+  /** Why: a checkout replaced at the same path must not read its predecessor's fallback layer. */
+  forIdentity?: string
+}
 
 /** Bottom to top per identity; the top layer is what the card shows. */
 const previews = new Map<string, PreviewLayer[]>()
@@ -55,20 +65,25 @@ function emit(): void {
 export function setWorkspaceColorTagPreviews(
   identities: readonly string[],
   colorTag: string | null,
-  owner: WorkspaceColorTagPreviewOwner
+  owner: WorkspaceColorTagPreviewOwner,
+  scope?: WorkspaceColorTagPreviewScope
 ): void {
   let changed = false
   for (const identity of identities) {
     const layers = previews.get(identity) ?? []
     const index = layers.findIndex((layer) => layer.owner === owner)
     const top = layers.at(-1)
-    if (index === layers.length - 1 && top?.colorTag === colorTag) {
+    if (
+      index === layers.length - 1 &&
+      top?.colorTag === colorTag &&
+      top.forIdentity === scope?.forIdentity
+    ) {
       continue
     }
     if (index !== -1) {
       layers.splice(index, 1)
     }
-    layers.push({ colorTag, owner })
+    layers.push({ colorTag, owner, forIdentity: scope?.forIdentity })
     previews.set(identity, layers)
     changed = true
   }
@@ -119,7 +134,20 @@ export function readWorkspaceColorTagPreview(
   if (canonical !== undefined) {
     return canonical
   }
-  return topLayer(getWorkspaceColorTagFallbackIdentity(worktree))
+  // Why filter: a fallback layer set on behalf of another identity belongs to a previous occupant
+  // of this path; a row with its own identity must not show it. A row without one cannot tell.
+  const own = worktree.identity?.key
+  const layers = previews.get(getWorkspaceColorTagFallbackIdentity(worktree)) ?? []
+  for (let index = layers.length - 1; index >= 0; index -= 1) {
+    const layer = layers[index]
+    if (!layer) {
+      continue
+    }
+    if (own === undefined || layer.forIdentity === undefined || layer.forIdentity === own) {
+      return layer.colorTag
+    }
+  }
+  return undefined
 }
 
 /** The previewed color for this card, or undefined when nothing is being previewed. */

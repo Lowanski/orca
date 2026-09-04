@@ -40,6 +40,25 @@ describe('workspace color tag preview readers across identity promotion', () => 
     expect(result.current).toBe('#ef4444')
   })
 
+  // Regression: a checkout replaced at the same path while its predecessor's write was pending read
+  // the predecessor's fallback layer and showed its pending color until that request settled.
+  it('hides a fallback layer set on behalf of another identity from a row that has its own', () => {
+    const replacement = {
+      id: 'repo::w',
+      hostId: 'ssh:box',
+      identity: { key: 'k-replacement' }
+    } as unknown as Worktree
+    const view = renderHook(() => useWorkspaceColorTagPreviewForWorktree(replacement))
+    const copy = renderHook(() => useWorkspaceColorTagPreviewForWorktree(identityLess))
+    act(() =>
+      setWorkspaceColorTagPreviews([fallbackKey], '#ef4444', owner, { forIdentity: 'k-old' })
+    )
+    expect(view.result.current).toBeUndefined()
+    expect(copy.result.current).toBe('#ef4444')
+    act(() => setWorkspaceColorTagPreviews([fallbackKey], '#22c55e', owner))
+    expect(view.result.current).toBe('#22c55e')
+  })
+
   it('prefers the canonical key and reads a previewed clear as null, not as nothing', () => {
     const { result } = renderHook(() => useWorkspaceColorTagPreviewForWorktree(promoted))
     act(() => setWorkspaceColorTagPreviews([fallbackKey], '#ef4444', owner))

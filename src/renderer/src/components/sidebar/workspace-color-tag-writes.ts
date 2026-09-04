@@ -67,6 +67,8 @@ type IdentityQueue = {
  */
 const queues = new Map<string, IdentityQueue>()
 let nextQueueSequence = 0
+/** The newest queue ever to claim each pre-identity key; only it may get the key back on a drain. */
+const latestClaim = new Map<string, number>()
 
 /**
  * Assign `colorTag` to every target. Resolves once each target's write — or a newer one that
@@ -101,16 +103,17 @@ function enqueue(
   const current = queueFor(worktree)
   // Why both keys: a not-yet-refreshed copy of this row still reads the channel under its
   // pre-identity key, and it must show the pending color for the whole write, not the old strip.
-  const previewIdentities = [
-    ...new Set([
-      getWorkspaceColorTagIdentity(worktree),
-      getWorkspaceColorTagFallbackIdentity(worktree)
-    ])
-  ]
-  for (const identity of previewIdentities) {
-    current.previewIdentities.add(identity)
+  const canonicalKey = getWorkspaceColorTagIdentity(worktree)
+  const fallbackKey = getWorkspaceColorTagFallbackIdentity(worktree)
+  current.previewIdentities.add(canonicalKey)
+  setWorkspaceColorTagPreviews([canonicalKey], colorTag, current.previewOwner)
+  if (fallbackKey !== canonicalKey) {
+    // Why scoped: a checkout replaced at this path must not show this row's pending color.
+    current.previewIdentities.add(fallbackKey)
+    setWorkspaceColorTagPreviews([fallbackKey], colorTag, current.previewOwner, {
+      forIdentity: worktree.identity?.key
+    })
   }
-  setWorkspaceColorTagPreviews(previewIdentities, colorTag, current.previewOwner)
   return new Promise<void>((resolve) => {
     // Latest wins: a newer value replaces an older pending one, and the older assignment's waiters
     // settle when the newer write lands — any later state satisfies them.
@@ -164,6 +167,7 @@ function queueFor(worktree: Worktree): IdentityQueue {
   // still addresses the row without an identity means the current occupant, not the one on its way
   // out. An identity-less queue is unaffected: its identity and fallback are the same string.
   queues.set(fallback, queue)
+  latestClaim.set(fallback, queue.sequence)
   return queue
 }
 
@@ -182,12 +186,17 @@ function drain(queue: IdentityQueue, write: WorkspaceColorTagWriter): void {
     // Why rebind: two occupants of one path can share the fallback key for a moment (a checkout
     // replaced while its predecessor's write is pending). Once the predecessor is gone, a copy that
     // still addresses the row without an identity must join the survivor, not open a third queue.
-    // Only a newer occupant qualifies: when the replacement finishes first, its predecessor must not
-    // inherit the key and pin later writes to a row on its way out.
-    if (!queues.has(queue.fallbackKey)) {
-      const survivor = [...new Set(queues.values())].find(
-        (registered) =>
-          registered.fallbackKey === queue.fallbackKey && registered.sequence > queue.sequence
+    // Only the latest claimant qualifies: when the newest occupant finished first, neither its
+    // predecessor nor a superseded intermediate may inherit the key and pin later writes to a row
+    // on its way out.
+    const remaining = [...new Set(queues.values())].filter(
+      (registered) => registered.fallbackKey === queue.fallbackKey
+    )
+    if (remaining.length === 0) {
+      latestClaim.delete(queue.fallbackKey)
+    } else if (!queues.has(queue.fallbackKey)) {
+      const survivor = remaining.find(
+        (registered) => registered.sequence === latestClaim.get(queue.fallbackKey)
       )
       if (survivor) {
         queues.set(queue.fallbackKey, survivor)

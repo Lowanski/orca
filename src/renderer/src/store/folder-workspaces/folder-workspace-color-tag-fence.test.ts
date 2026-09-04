@@ -45,6 +45,16 @@ describe('preserveFencedFolderColorTags', () => {
     expect(merged[0]?.colorTag).toBeNull()
   })
 
+  // Regression: the fence returned a fresh array even when it held nothing, and the catalog actions
+  // read that as a changed catalog on every refetch.
+  it('returns the merged array itself when nothing is held', () => {
+    const merged = [folder('f-5', '#22c55e')]
+    expect(preserveFencedFolderColorTags(merged, [folder('f-5', '#22c55e')], groups, 0)).toBe(
+      merged
+    )
+    expect(preserveFencedFolderColorTags(merged, [], groups, 0)).toBe(merged)
+  })
+
   it('leaves rows on another host and rows with an unchanged color untouched', () => {
     folderColorTagWriteFence.begin('f-3', 'local', undefined, undefined, { written: '#ef4444' })
     const merged = preserveFencedFolderColorTags(
