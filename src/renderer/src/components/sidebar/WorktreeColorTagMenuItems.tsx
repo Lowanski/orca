@@ -1,32 +1,31 @@
 import React, { useCallback, useRef, useState } from 'react'
-import { HexColorPicker } from 'react-colorful'
-import { Palette, Slash } from 'lucide-react'
+import { Slash } from 'lucide-react'
 
-import {
-  DropdownMenuItem,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger
-} from '@/components/ui/dropdown-menu'
-import { Input } from '@/components/ui/input'
+import { DropdownMenuItem } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
 import {
-  normalizeWorkspaceColorTag,
   resolveWorkspaceColorTagSelection,
   WORKSPACE_COLOR_TAG_SWATCHES
 } from '../../../../shared/workspace-color-tag'
 
-const FULL_HEX_COLOR_PATTERN = /^#?[0-9a-fA-F]{6}$/
-const DRAFT_SEED_COLOR = WORKSPACE_COLOR_TAG_SWATCHES[0]
-// Null is the explicit "no color" slot, so it leads the row rather than hiding behind a gray chip.
-const SWATCH_OPTIONS: readonly (string | null)[] = [null, ...WORKSPACE_COLOR_TAG_SWATCHES]
+/** Swatch identity: null clears the tag, `custom` opens the picker, a hex assigns directly. */
+type SwatchOption = string | null | 'custom'
+
+// The empty slot leads and the custom wheel closes the row, so the presets read as one strip.
+const SWATCH_OPTIONS: readonly SwatchOption[] = [null, ...WORKSPACE_COLOR_TAG_SWATCHES, 'custom']
+
+// Why inline: it is a swatch, not a token — the wheel names the picker the way the hexes name
+// themselves, and no palette entry can stand for "any color".
+const CUSTOM_SWATCH_GRADIENT =
+  'conic-gradient(#ef4444, #eab308, #22c55e, #14b8a6, #8b5cf6, #ec4899, #ef4444)'
 
 type WorktreeColorTagMenuItemsProps = {
   colorTag: string | null
   disabled: boolean
   isMultiContext: boolean
   onAssignColorTag: (colorTag: string | null) => void
+  onOpenCustomPicker: () => void
 }
 
 function getInitialSwatchIndex(colorTag: string | null): number {
@@ -34,9 +33,12 @@ function getInitialSwatchIndex(colorTag: string | null): number {
   return index === -1 ? 0 : index
 }
 
-function getSwatchLabel(swatch: string | null, isSelected: boolean): string {
+function getSwatchLabel(swatch: SwatchOption, isSelected: boolean): string {
   if (swatch === null) {
     return translate('auto.components.sidebar.WorktreeColorTagMenuItems.noColor', 'No color')
+  }
+  if (swatch === 'custom') {
+    return translate('auto.components.sidebar.WorktreeColorTagMenuItems.custom', 'Custom color')
   }
   return isSelected
     ? translate(
@@ -55,13 +57,13 @@ export function WorktreeColorTagMenuItems({
   colorTag,
   disabled,
   isMultiContext,
-  onAssignColorTag
+  onAssignColorTag,
+  onOpenCustomPicker
 }: WorktreeColorTagMenuItemsProps): React.JSX.Element {
   const [activeIndex, setActiveIndex] = useState(() => getInitialSwatchIndex(colorTag))
   // Why: the row is one menu stop, so the swatch a click or Enter lands on has to
   // survive into the item's onSelect without waiting for a state re-render.
   const activeIndexRef = useRef(activeIndex)
-  const [draft, setDraft] = useState(() => colorTag ?? DRAFT_SEED_COLOR)
 
   const moveActiveIndex = useCallback((index: number) => {
     const wrapped = (index + SWATCH_OPTIONS.length) % SWATCH_OPTIONS.length
@@ -83,96 +85,69 @@ export function WorktreeColorTagMenuItems({
     [moveActiveIndex]
   )
 
-  const commitDraft = useCallback(
-    (value: string) => {
-      setDraft(value)
-      // Why: assign only on a complete hex so a half-typed "#ab" does not clear the tag.
-      // No toggle here either — re-picking mid-drag must not clear what the drag just set.
-      if (FULL_HEX_COLOR_PATTERN.test(value.trim())) {
-        onAssignColorTag(normalizeWorkspaceColorTag(value))
-      }
-    },
-    [onAssignColorTag]
-  )
+  const handleSelect = useCallback(() => {
+    const swatch = SWATCH_OPTIONS[activeIndexRef.current]
+    if (swatch === 'custom') {
+      onOpenCustomPicker()
+      return
+    }
+    onAssignColorTag(resolveWorkspaceColorTagSelection(colorTag, swatch))
+  }, [colorTag, onAssignColorTag, onOpenCustomPicker])
 
   return (
-    <>
-      <DropdownMenuItem
-        disabled={disabled}
-        className="px-2 py-1.5 focus:bg-transparent dark:focus:bg-transparent"
-        onSelect={() =>
-          onAssignColorTag(
-            resolveWorkspaceColorTagSelection(colorTag, SWATCH_OPTIONS[activeIndexRef.current])
-          )
-        }
-        onKeyDown={handleRowKeyDown}
-        aria-label={
-          isMultiContext
-            ? translate(
-                'auto.components.sidebar.WorktreeColorTagMenuItems.groupColorMulti',
-                'Group color for selected workspaces'
-              )
-            : translate(
-                'auto.components.sidebar.WorktreeColorTagMenuItems.groupColor',
-                'Group color'
-              )
-        }
-      >
-        <div className="flex w-full items-center justify-between gap-1" role="radiogroup">
-          {SWATCH_OPTIONS.map((swatch, index) => {
-            const isSelected = swatch === colorTag
-            return (
-              <button
-                key={swatch ?? 'none'}
-                type="button"
-                role="radio"
-                tabIndex={-1}
-                aria-checked={isSelected}
-                aria-label={getSwatchLabel(swatch, isSelected)}
-                data-workspace-color-swatch={swatch ?? 'none'}
-                onPointerEnter={() => moveActiveIndex(index)}
-                onClick={() => {
-                  activeIndexRef.current = index
-                }}
-                className={cn(
-                  'flex size-4 items-center justify-center rounded-full outline-none transition-shadow',
-                  swatch === null && 'border border-border text-muted-foreground',
-                  isSelected && 'ring-2 ring-foreground ring-offset-2 ring-offset-popover',
-                  !isSelected &&
-                    index === activeIndex &&
-                    'ring-1 ring-muted-foreground ring-offset-2 ring-offset-popover'
-                )}
-                style={swatch === null ? undefined : { backgroundColor: swatch }}
-              >
-                {swatch === null ? <Slash className="size-2.5" /> : null}
-              </button>
+    <DropdownMenuItem
+      disabled={disabled}
+      className="px-2 py-1.5 focus:bg-transparent dark:focus:bg-transparent"
+      onSelect={handleSelect}
+      onKeyDown={handleRowKeyDown}
+      aria-label={
+        isMultiContext
+          ? translate(
+              'auto.components.sidebar.WorktreeColorTagMenuItems.groupColorMulti',
+              'Group color for selected workspaces'
             )
-          })}
-        </div>
-      </DropdownMenuItem>
-      <DropdownMenuSub>
-        <DropdownMenuSubTrigger disabled={disabled}>
-          <Palette className="size-3.5" />
-          {translate('auto.components.sidebar.WorktreeColorTagMenuItems.custom', 'Custom color')}
-        </DropdownMenuSubTrigger>
-        <DropdownMenuSubContent
-          className="w-auto space-y-2 p-2"
-          // Why: react-colorful and the hex field own their keys; the menu's typeahead
-          // would otherwise swallow every character typed into the input.
-          onKeyDown={(event) => event.stopPropagation()}
-        >
-          <HexColorPicker color={draft} onChange={commitDraft} />
-          <Input
-            value={draft}
-            onChange={(event) => commitDraft(event.target.value)}
-            aria-label={translate(
-              'auto.components.sidebar.WorktreeColorTagMenuItems.hex',
-              'Hex color'
-            )}
-            className="h-7 w-full text-xs"
-          />
-        </DropdownMenuSubContent>
-      </DropdownMenuSub>
-    </>
+          : translate('auto.components.sidebar.WorktreeColorTagMenuItems.groupColor', 'Group color')
+      }
+    >
+      <div className="flex w-full items-center justify-between gap-1" role="radiogroup">
+        {SWATCH_OPTIONS.map((swatch, index) => {
+          const isSelected = swatch === colorTag
+          const isCustom = swatch === 'custom'
+          return (
+            <button
+              key={swatch ?? 'none'}
+              type="button"
+              role={isCustom ? 'menuitem' : 'radio'}
+              tabIndex={-1}
+              aria-checked={isCustom ? undefined : isSelected}
+              aria-haspopup={isCustom ? 'dialog' : undefined}
+              aria-label={getSwatchLabel(swatch, isSelected)}
+              data-workspace-color-swatch={swatch ?? 'none'}
+              onPointerEnter={() => moveActiveIndex(index)}
+              onClick={() => {
+                activeIndexRef.current = index
+              }}
+              className={cn(
+                'flex size-4 items-center justify-center rounded-full outline-none transition-shadow',
+                swatch === null && 'border border-border text-muted-foreground',
+                isSelected && 'ring-2 ring-foreground ring-offset-2 ring-offset-popover',
+                !isSelected &&
+                  index === activeIndex &&
+                  'ring-1 ring-muted-foreground ring-offset-2 ring-offset-popover'
+              )}
+              style={
+                isCustom
+                  ? { backgroundImage: CUSTOM_SWATCH_GRADIENT }
+                  : swatch === null
+                    ? undefined
+                    : { backgroundColor: swatch }
+              }
+            >
+              {swatch === null ? <Slash className="size-2.5" /> : null}
+            </button>
+          )
+        })}
+      </div>
+    </DropdownMenuItem>
   )
 }

@@ -3,6 +3,7 @@ import { DEFAULT_REPO_BADGE_COLOR } from './constants'
 import {
   isPresetWorkspaceColorTag,
   normalizeWorkspaceColorTag,
+  getSharedWorkspaceColorTag,
   resolveWorkspaceColorTagSelection,
   WORKSPACE_COLOR_TAG_SWATCHES
 } from './workspace-color-tag'
@@ -69,5 +70,26 @@ describe('resolveWorkspaceColorTagSelection', () => {
   it('stays cleared when the "no color" slot is picked', () => {
     expect(resolveWorkspaceColorTagSelection('#ef4444', null)).toBeNull()
     expect(resolveWorkspaceColorTagSelection(null, null)).toBeNull()
+  })
+})
+
+describe('getSharedWorkspaceColorTag', () => {
+  it('reports the color when every workspace in the selection carries it', () => {
+    expect(getSharedWorkspaceColorTag(['#ef4444', '#ef4444', '#EF4444'])).toBe('#ef4444')
+  })
+
+  it('reports null for a mixed selection, so picking a color unifies instead of clearing', () => {
+    expect(getSharedWorkspaceColorTag(['#ef4444', '#22c55e'])).toBeNull()
+    expect(getSharedWorkspaceColorTag(['#ef4444', null])).toBeNull()
+    expect(getSharedWorkspaceColorTag(['#ef4444', undefined])).toBeNull()
+  })
+
+  it('reports null for an untagged or empty selection', () => {
+    expect(getSharedWorkspaceColorTag([null, null])).toBeNull()
+    expect(getSharedWorkspaceColorTag([])).toBeNull()
+  })
+
+  it('drops unusable stored values rather than treating them as a distinct tag', () => {
+    expect(getSharedWorkspaceColorTag(['not-a-color', null])).toBeNull()
   })
 })

@@ -5,6 +5,7 @@ import { normalizeStoredTaskSourceContext } from './task-source-context'
 import { normalizeWorkspaceLinkedItem } from './workspace-linked-item'
 import { isWorkspaceLinkedItemSourceContextMatch } from './workspace-linked-item-source-context'
 import { normalizeWorkspaceCreatorProvenance } from './workspace-creator-provenance'
+import { normalizeWorkspaceColorTag } from './workspace-color-tag'
 
 export function normalizeFolderWorkspaceName(
   name: string | null | undefined,
@@ -90,6 +91,9 @@ export function normalizeFolderWorkspaces(
         : {}),
       ...(typeof raw.workspaceStatus === 'string' && raw.workspaceStatus.trim().length > 0
         ? { workspaceStatus: raw.workspaceStatus }
+        : {}),
+      ...(normalizeWorkspaceColorTag(raw.colorTag) !== null
+        ? { colorTag: normalizeWorkspaceColorTag(raw.colorTag) }
         : {}),
       ...(isTuiAgent(raw.createdWithAgent) ? { createdWithAgent: raw.createdWithAgent } : {}),
       ...(raw.pendingFirstAgentMessageRename === true

@@ -28,3 +28,16 @@ export function resolveWorkspaceColorTagSelection(
     ? null
     : normalizedChosen
 }
+
+/** The tag a whole selection carries, or null when it is mixed or untagged. Toggle-off must key
+ *  off the selection as a whole: keying off the right-clicked workspace alone would clear a mixed
+ *  selection when the user meant to unify it. */
+export function getSharedWorkspaceColorTag(
+  colorTags: readonly (string | null | undefined)[]
+): string | null {
+  if (colorTags.length === 0) {
+    return null
+  }
+  const first = normalizeWorkspaceColorTag(colorTags[0])
+  return colorTags.every((tag) => normalizeWorkspaceColorTag(tag) === first) ? first : null
+}
