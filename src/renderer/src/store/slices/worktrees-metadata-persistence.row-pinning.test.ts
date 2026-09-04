@@ -122,6 +122,43 @@ describe('runtime-owner-scoped writes for identity-less rows', () => {
   })
 })
 
+describe('identity-pinned writes across a rename during the preflight yield', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetRemoteRuntimeMocks()
+  })
+
+  // Regression: the pinned row was re-resolved after the awaited preflight, but apply, persistence,
+  // and rollback kept the id from before the yield; a rename during it left the reducers matching
+  // nothing and local IPC holding a retired locator.
+  it('applies and persists under the id the row has after the yield', async () => {
+    const store = createTestStore()
+    const before = makeWorktree({
+      id: 'repo1::/path/before',
+      repoId: 'repo1',
+      path: '/path/before',
+      identity: { key: 'k-same' } as never,
+      colorTag: null
+    })
+    const after = { ...before, id: 'repo1::/path/after', path: '/path/after' }
+    store.setState({ worktreesByRepo: { repo1: [before] } } as Partial<AppState>)
+
+    const pending = store
+      .getState()
+      .updateWorktreeMeta(before.id, { colorTag: '#ef4444' }, { identityKey: 'k-same' })
+    store.setState({ worktreesByRepo: { repo1: [after] } } as Partial<AppState>)
+    const result = await pending
+
+    expect(result.ok).toBe(true)
+    expect(store.getState().worktreesByRepo.repo1[0]?.colorTag).toBe('#ef4444')
+    expect(mockApi.worktrees.updateMeta).toHaveBeenCalledTimes(1)
+    expect(mockApi.worktrees.updateMeta.mock.calls[0]?.[0]).toMatchObject({
+      worktreeId: 'repo1::/path/after',
+      identityKey: 'k-same'
+    })
+  })
+})
+
 describe('runtime-owner pins on folder workspaces', () => {
   beforeEach(() => {
     vi.clearAllMocks()

@@ -13,15 +13,21 @@ export function preserveConcurrentColorTag<T extends Worktree>(
   if (!requestStarted || !current) {
     return [...incoming]
   }
-  const startedById = new Map(
-    requestStarted.filter(matchesRefreshHost).map((worktree) => [worktree.id, worktree])
-  )
-  const currentById = new Map(
-    current.filter(matchesRefreshHost).map((worktree) => [worktree.id, worktree])
-  )
+  const startedRows = requestStarted.filter(matchesRefreshHost)
+  const currentRows = current.filter(matchesRefreshHost)
+  const startedById = new Map(startedRows.map((worktree) => [worktree.id, worktree]))
+  const currentById = new Map(currentRows.map((worktree) => [worktree.id, worktree]))
+  const startedByIdentity = byIdentity(startedRows)
+  const currentByIdentity = byIdentity(currentRows)
   return incoming.map((worktree) => {
-    const started = startedById.get(worktree.id)
-    const latest = currentById.get(worktree.id)
+    // Why identity first: a folder rename between the snapshot and this merge changes the
+    // path-derived id while the row keeps its identity; keyed by id alone both lookups miss and the
+    // stale answer lands unfenced. Rows without an identity keep the id lookup.
+    const key = worktree.identity?.key
+    const started =
+      (key === undefined ? undefined : startedByIdentity.get(key)) ?? startedById.get(worktree.id)
+    const latest =
+      (key === undefined ? undefined : currentByIdentity.get(key)) ?? currentById.get(worktree.id)
     if (!started || !latest) {
       return worktree
     }
@@ -49,6 +55,16 @@ export function preserveConcurrentColorTag<T extends Worktree>(
     }
     return worktree
   })
+}
+
+function byIdentity(rows: readonly Worktree[]): Map<string, Worktree> {
+  const map = new Map<string, Worktree>()
+  for (const row of rows) {
+    if (row.identity?.key !== undefined) {
+      map.set(row.identity.key, row)
+    }
+  }
+  return map
 }
 
 /** Rows without identities cannot be told apart and keep the pre-identity behaviour. */

@@ -44,7 +44,7 @@ export function createUpdateWorktreeMeta(
     // Why: a folder rename retires the path-derived locator while the old row is still visible; a
     // pinned write follows the identity to the row's current id so it is never persisted under
     // the retired one and never rejected as missing once the renamed row has arrived.
-    const worktreeId = pinnedMatch?.id ?? requestedWorktreeId
+    let worktreeId = pinnedMatch?.id ?? requestedWorktreeId
     // Why not fall back: the locator is mutable (the row may be gone or its path reused) and local
     // persistence carries no identity, so a fallback would stamp the value on whatever occupies the
     // path now, or recreate metadata for a deleted workspace. A pinned owner whose row is gone must
@@ -93,6 +93,9 @@ export function createUpdateWorktreeMeta(
     if (isPinned && !pinnedNow) {
       return identityGone()
     }
+    // Why adopt the new id: reconciliation can also rename the pinned row during that yield. The
+    // reducers match ids exactly and local IPC rejects a retired locator, so the write follows the row.
+    worktreeId = pinnedNow?.id ?? worktreeId
     const worktreeForUpdate = pinnedNow ?? get().getKnownWorktreeById(worktreeId, executionHostId)
     if (shouldApplyUpdate && !shouldApplyUpdate(worktreeForUpdate)) {
       return { ok: true }

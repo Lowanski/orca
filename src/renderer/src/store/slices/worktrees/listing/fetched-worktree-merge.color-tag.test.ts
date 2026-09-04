@@ -94,6 +94,20 @@ describe('preserveConcurrentColorTag across occupant turnover', () => {
     expect(merged[0]?.colorTag).toBe('#ef4444')
   })
 
+  // Regression: the maps keyed by path id, so a folder rename between the snapshot and the merge
+  // made both lookups miss and the stale listing replaced the color assigned meanwhile.
+  it('follows an identity-preserving rename between the snapshot and the merge', () => {
+    const renamed = (id: string, colorTag: string | null): Worktree =>
+      ({ id, hostId: 'local', colorTag, identity: { key: 'k-same' } }) as unknown as Worktree
+    const merged = preserveConcurrentColorTag(
+      [renamed('b', null)],
+      [renamed('a', null)],
+      [renamed('b', '#ef4444')],
+      anyHost
+    )
+    expect(merged[0]?.colorTag).toBe('#ef4444')
+  })
+
   it('keeps pre-identity behaviour when rows carry no identity', () => {
     const merged = preserveConcurrentColorTag(
       [worktree('a', null)],

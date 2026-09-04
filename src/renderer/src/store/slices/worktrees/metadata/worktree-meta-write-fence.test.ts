@@ -87,6 +87,16 @@ describe('MetaWriteFence', () => {
     expect(legacy.isPending('w', 'ssh:box', undefined, undefined, 'env-b')).toBe(true)
   })
 
+  // Regression: a write that began under the pre-rename id could not fence a stale refresh merged
+  // under the new id, although both sides carried the same identity.
+  it('matches a renamed row by identity even though the id has changed', () => {
+    const { fence } = fenceAt(1000)
+    fence.begin('repo::/before', 'local', 'k-same')
+    expect(fence.isPending('repo::/after', 'local', undefined, 'k-same')).toBe(true)
+    expect(fence.isPending('repo::/after', 'local', undefined, 'k-other')).toBe(false)
+    expect(fence.isPending('repo::/after', 'local')).toBe(false)
+  })
+
   it('matches a host-agnostic query against a host-scoped entry and vice versa', () => {
     const { fence } = fenceAt(1000)
     fence.begin('w', 'ssh:box')

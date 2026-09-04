@@ -97,10 +97,11 @@ export class MetaWriteFence {
   }
 }
 
-// Why identity wins when both sides have one: two HUBs can publish one checkout as rows sharing id
-// and physical host, and a write for one must not fence the other's refresh. Before those rows have
-// identities the runtime owner tells them apart the same way. A side that knows neither falls back
-// to id and host, as before.
+// Why identity wins when both sides have one, and is compared before the id: two HUBs can publish
+// one checkout as rows sharing id and physical host, and a write for one must not fence the other's
+// refresh; and a folder rename retires the id a write began under while the row keeps its identity,
+// so a stale refresh merged under the new id must still meet the fence. Before rows have identities
+// the runtime owner tells them apart. A side that knows neither falls back to id and host, as before.
 function matches(
   entry: FenceEntry,
   worktreeId: string,
@@ -108,11 +109,11 @@ function matches(
   identityKey?: string,
   runtimeOwnerEnvironmentId?: string
 ): boolean {
-  if (entry.worktreeId !== worktreeId) {
-    return false
-  }
   if (entry.identityKey !== undefined && identityKey !== undefined) {
     return entry.identityKey === identityKey
+  }
+  if (entry.worktreeId !== worktreeId) {
+    return false
   }
   if (
     entry.runtimeOwnerEnvironmentId !== undefined &&
