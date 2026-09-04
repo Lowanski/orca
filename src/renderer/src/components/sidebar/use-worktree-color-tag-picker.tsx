@@ -10,7 +10,6 @@ import {
 } from '@/store/slices/worktrees/listing/detected-worktree-meta'
 import {
   getSharedWorkspaceColorTag,
-  getWorkspaceColorTagIdentity,
   isMixedWorkspaceColorTagSelection
 } from '../../../../shared/workspace-color-tag'
 import { DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
@@ -227,10 +226,6 @@ export function useWorktreeColorTagPicker({
   const pickerTargets = snapshot ?? contextWorktrees
   const pickerTags = useEffectiveColorTags(pickerTargets)
   const pickerColorTag = useMemo(() => getSharedWorkspaceColorTag(pickerTags), [pickerTags])
-  const previewIdentities = useMemo(
-    () => pickerTargets.map((item) => getWorkspaceColorTagIdentity(item)),
-    [pickerTargets]
-  )
   const commitPickerColorTag = useCallback(
     (colorTag: string | null) => onAssignColorTag(colorTag, pickerTargets),
     [onAssignColorTag, pickerTargets]
@@ -264,7 +259,7 @@ export function useWorktreeColorTagPicker({
         open={open}
         colorTag={pickerColorTag}
         menuPoint={menuPoint}
-        previewIdentities={previewIdentities}
+        previewTargets={pickerTargets}
         onOpenChange={handleOpenChange}
         onCommitColorTag={commitPickerColorTag}
         onRestoreFocus={restoreFocusUnlessSuperseded}

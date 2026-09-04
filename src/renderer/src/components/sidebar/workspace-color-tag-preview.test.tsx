@@ -6,7 +6,10 @@ import type { Worktree } from '../../../../shared/worktree/types'
 import { getWorkspaceColorTagFallbackIdentity } from '../../../../shared/workspace-color-tag'
 import {
   clearWorkspaceColorTagPreviews,
+  clearWorkspaceColorTagPreviewsFor,
   createWorkspaceColorTagPreviewOwner,
+  previewWorkspaceColorTagsFor,
+  readWorkspaceColorTagPreview,
   setWorkspaceColorTagPreviews,
   useWorkspaceColorTagPreview,
   useWorkspaceColorTagPreviewForWorktree,
@@ -75,6 +78,41 @@ describe('workspace color tag preview readers across identity promotion', () => 
     expect(result.current).toEqual(['#22c55e', undefined])
     act(() => setWorkspaceColorTagPreviews([fallbackKey], null, owner))
     expect(result.current).toEqual(['#22c55e', null])
+  })
+})
+
+describe('previewWorkspaceColorTagsFor', () => {
+  const owner = createWorkspaceColorTagPreviewOwner()
+  const promoted = {
+    id: 'repo::p',
+    hostId: 'ssh:box',
+    identity: { key: 'k-p' }
+  } as unknown as Worktree
+  const copy = { id: 'repo::p', hostId: 'ssh:box' } as unknown as Worktree
+  const replacement = {
+    id: 'repo::p',
+    hostId: 'ssh:box',
+    identity: { key: 'k-r' }
+  } as unknown as Worktree
+  afterEach(() => act(() => clearWorkspaceColorTagPreviewsFor([promoted, copy], owner)))
+
+  // Regression: the picker previewed under canonical keys only, so a copy of the row that had not
+  // refreshed yet did not follow the wheel until the write landed.
+  it('reaches the canonical row and an identity-less copy, but not a replacement occupant', () => {
+    previewWorkspaceColorTagsFor([promoted], '#ef4444', owner)
+    expect(readWorkspaceColorTagPreview(promoted)).toBe('#ef4444')
+    expect(readWorkspaceColorTagPreview(copy)).toBe('#ef4444')
+    expect(readWorkspaceColorTagPreview(replacement)).toBeUndefined()
+    clearWorkspaceColorTagPreviewsFor([promoted], owner)
+    expect(readWorkspaceColorTagPreview(promoted)).toBeUndefined()
+    expect(readWorkspaceColorTagPreview(copy)).toBeUndefined()
+  })
+
+  it('scopes an identity-less row to the occupant its caller knows', () => {
+    previewWorkspaceColorTagsFor([copy], '#22c55e', owner, 'k-p')
+    expect(readWorkspaceColorTagPreview(promoted)).toBe('#22c55e')
+    expect(readWorkspaceColorTagPreview(copy)).toBe('#22c55e')
+    expect(readWorkspaceColorTagPreview(replacement)).toBeUndefined()
   })
 })
 

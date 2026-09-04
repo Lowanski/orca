@@ -8,9 +8,10 @@ import {
   WORKSPACE_COLOR_TAG_SWATCHES
 } from '../../../../shared/workspace-color-tag'
 import {
-  clearWorkspaceColorTagPreviews,
+  clearWorkspaceColorTagPreviewsFor,
+  type PreviewedWorktree,
+  previewWorkspaceColorTagsFor,
   createWorkspaceColorTagPreviewOwner,
-  setWorkspaceColorTagPreviews,
   type WorkspaceColorTagPreviewOwner
 } from './workspace-color-tag-preview'
 
@@ -24,7 +25,7 @@ type WorktreeColorTagPickerPopoverProps = {
   /** Right-click point inside the card's relative scope, so the picker lands where the menu was. */
   menuPoint: { x: number; y: number }
   /** Host-qualified identities of every card the picker is previewing for. */
-  previewIdentities: readonly string[]
+  previewTargets: readonly PreviewedWorktree[]
   onOpenChange: (open: boolean) => void
   /** Resolves once the write has landed in the store; the preview is held until then. */
   onCommitColorTag: (colorTag: string | null) => Promise<void>
@@ -34,7 +35,7 @@ type WorktreeColorTagPickerPopoverProps = {
 
 type WorktreeColorTagPickerFieldsProps = {
   initialColor: string
-  previewIdentities: readonly string[]
+  previewTargets: readonly PreviewedWorktree[]
   /** The last complete color the card was shown; the popover commits this on close. */
   lastValidRef: React.MutableRefObject<string | null>
   /** Who set this open session's previews, so a later clear removes only these. */
@@ -48,7 +49,7 @@ type WorktreeColorTagPickerFieldsProps = {
  */
 function WorktreeColorTagPickerFields({
   initialColor,
-  previewIdentities,
+  previewTargets,
   lastValidRef,
   previewOwnerRef,
   onCommit
@@ -78,9 +79,9 @@ function WorktreeColorTagPickerFields({
       }
       setLastValid(normalized)
       lastValidRef.current = normalized
-      setWorkspaceColorTagPreviews(previewIdentities, normalized, owner)
+      previewWorkspaceColorTagsFor(previewTargets, normalized, owner)
     },
-    [lastValidRef, owner, previewIdentities]
+    [lastValidRef, owner, previewTargets]
   )
 
   // The wheel only ever renders a complete color: the draft if it parses, else the last one that did.
@@ -135,7 +136,7 @@ export function WorktreeColorTagPickerPopover({
   open,
   colorTag,
   menuPoint,
-  previewIdentities,
+  previewTargets,
   onOpenChange,
   onCommitColorTag,
   onRestoreFocus
@@ -150,10 +151,10 @@ export function WorktreeColorTagPickerPopover({
   const clearPreviews = useCallback(
     (owner: WorkspaceColorTagPreviewOwner | null) => {
       if (owner) {
-        clearWorkspaceColorTagPreviews(previewIdentities, owner)
+        clearWorkspaceColorTagPreviewsFor(previewTargets, owner)
       }
     },
-    [previewIdentities]
+    [previewTargets]
   )
 
   // Why a named release: the cleanup must read which session is closing *at close time*, and a
@@ -250,7 +251,7 @@ export function WorktreeColorTagPickerPopover({
       >
         <WorktreeColorTagPickerFields
           initialColor={colorTag ?? SEED_COLOR}
-          previewIdentities={previewIdentities}
+          previewTargets={previewTargets}
           lastValidRef={lastValidRef}
           previewOwnerRef={previewOwnerRef}
           onCommit={commitFromKeyboard}

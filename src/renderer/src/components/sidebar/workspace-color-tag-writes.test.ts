@@ -369,6 +369,32 @@ describe('assignWorkspaceColorTags', () => {
     settleAll()
   })
 
+  // Regression: a newer color enqueued from a not-yet-refreshed copy previewed under the pre-identity
+  // key only, so the canonical card kept the older color until the next write started.
+  it('shows the newest pending color on every representation of the row', () => {
+    const { write, settleAll } = deferredWriter()
+    const canonical = {
+      id: 'dup::w',
+      hostId: 'ssh:box',
+      identity: { key: 'k-dup' },
+      runtimeOwnerEnvironmentId: 'env-d'
+    } as unknown as Worktree
+    const copy = {
+      id: 'dup::w',
+      hostId: 'ssh:box',
+      runtimeOwnerEnvironmentId: 'env-d'
+    } as unknown as Worktree
+    const replacement = { ...canonical, identity: { key: 'k-dup-2' } } as unknown as Worktree
+
+    void assignWorkspaceColorTags([canonical], '#111111', write, vi.fn())
+    void assignWorkspaceColorTags([copy], '#222222', write, vi.fn())
+    expect(write).toHaveBeenCalledTimes(1)
+    expect(readWorkspaceColorTagPreview(canonical)).toBe('#222222')
+    expect(readWorkspaceColorTagPreview(copy)).toBe('#222222')
+    expect(readWorkspaceColorTagPreview(replacement)).toBeUndefined()
+    settleAll()
+  })
+
   // Regression: an identity-less direct-SSH row was written with no pin at all, so the reducers
   // recolored a HUB-proxied sibling too and the owner guess could persist through the HUB.
   it('pins a desktop-listed row with an explicit null owner', () => {

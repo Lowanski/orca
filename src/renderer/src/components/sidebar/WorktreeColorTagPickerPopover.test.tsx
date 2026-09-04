@@ -40,10 +40,12 @@ vi.mock('@/components/ui/popover', () => ({
 }))
 
 import { WorktreeColorTagPickerPopover } from './WorktreeColorTagPickerPopover'
-import { useWorkspaceColorTagPreview } from './workspace-color-tag-preview'
+import { type PreviewedWorktree, useWorkspaceColorTagPreview } from './workspace-color-tag-preview'
+import { getWorkspaceColorTagIdentity } from '../../../../shared/workspace-color-tag'
 
 const POINT = { x: 0, y: 0 }
-const IDENTITY = 'local::repo::a'
+const TARGET = { id: 'repo::a', hostId: 'local' } as PreviewedWorktree
+const IDENTITY = getWorkspaceColorTagIdentity(TARGET)
 
 type CommitMock = Mock<(colorTag: string | null) => Promise<void>>
 
@@ -71,7 +73,7 @@ function mount(props: { colorTag: string | null; open?: boolean; onCommitColorTa
           open={props.open ?? true}
           colorTag={props.colorTag}
           menuPoint={POINT}
-          previewIdentities={[IDENTITY]}
+          previewTargets={[TARGET]}
           onOpenChange={onOpenChange}
           onCommitColorTag={onCommitColorTag}
           onRestoreFocus={onRestoreFocus}
@@ -298,7 +300,7 @@ describe('WorktreeColorTagPickerPopover', () => {
           open={false}
           colorTag={null}
           menuPoint={POINT}
-          previewIdentities={[IDENTITY]}
+          previewTargets={[TARGET]}
           onOpenChange={vi.fn()}
           onCommitColorTag={vi
             .fn<(colorTag: string | null) => Promise<void>>()
@@ -358,7 +360,7 @@ describe('WorktreeColorTagPickerPopover', () => {
           open
           colorTag={null}
           menuPoint={POINT}
-          previewIdentities={[IDENTITY]}
+          previewTargets={[TARGET]}
           onOpenChange={vi.fn()}
           onCommitColorTag={vi
             .fn<(colorTag: string | null) => Promise<void>>()

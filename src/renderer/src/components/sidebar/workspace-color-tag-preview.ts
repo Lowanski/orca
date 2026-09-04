@@ -29,7 +29,10 @@ export function createWorkspaceColorTagPreviewOwner(): WorkspaceColorTagPreviewO
   return Symbol('workspace-color-tag-preview')
 }
 
-type PreviewedWorktree = Pick<Worktree, 'id' | 'hostId' | 'identity' | 'runtimeOwnerEnvironmentId'>
+export type PreviewedWorktree = Pick<
+  Worktree,
+  'id' | 'hostId' | 'identity' | 'runtimeOwnerEnvironmentId'
+>
 
 /** A previewed `null` is "no color", as distinct from `undefined`, "nothing previewed". */
 type PreviewLayer = {
@@ -62,34 +65,100 @@ function emit(): void {
 // Why batch: a drag fires per pointer move across every selected card, and every mounted card
 // subscribes. Mutating the whole set and notifying once keeps that at one broadcast per move
 // instead of selected × rendered.
-export function setWorkspaceColorTagPreviews(
-  identities: readonly string[],
-  colorTag: string | null,
-  owner: WorkspaceColorTagPreviewOwner,
-  scope?: WorkspaceColorTagPreviewScope
+type PreviewEntry = { identity: string; colorTag: string | null; forIdentity?: string }
+
+function applyPreviewEntries(
+  entries: readonly PreviewEntry[],
+  owner: WorkspaceColorTagPreviewOwner
 ): void {
   let changed = false
-  for (const identity of identities) {
+  for (const { identity, colorTag, forIdentity } of entries) {
     const layers = previews.get(identity) ?? []
     const index = layers.findIndex((layer) => layer.owner === owner)
     const top = layers.at(-1)
     if (
       index === layers.length - 1 &&
       top?.colorTag === colorTag &&
-      top.forIdentity === scope?.forIdentity
+      top.forIdentity === forIdentity
     ) {
       continue
     }
     if (index !== -1) {
       layers.splice(index, 1)
     }
-    layers.push({ colorTag, owner, forIdentity: scope?.forIdentity })
+    layers.push({ colorTag, owner, forIdentity })
     previews.set(identity, layers)
     changed = true
   }
   if (changed) {
     emit()
   }
+}
+
+export function setWorkspaceColorTagPreviews(
+  identities: readonly string[],
+  colorTag: string | null,
+  owner: WorkspaceColorTagPreviewOwner,
+  scope?: WorkspaceColorTagPreviewScope
+): void {
+  applyPreviewEntries(
+    identities.map((identity) => ({ identity, colorTag, forIdentity: scope?.forIdentity })),
+    owner
+  )
+}
+
+/**
+ * Every key a row's preview must reach: its canonical key, and its pre-identity key scoped to the
+ * occupant, so a copy of the row that has not refreshed yet follows along while a checkout that
+ * replaced it at the same path does not. An identity-less row has one key; it is scoped to the
+ * occupant its caller knows, if any.
+ */
+function previewEntriesFor(
+  rows: readonly PreviewedWorktree[],
+  colorTag: string | null,
+  occupant: string | undefined
+): PreviewEntry[] {
+  const entries: PreviewEntry[] = []
+  for (const row of rows) {
+    const canonical = getWorkspaceColorTagIdentity(row)
+    const fallback = getWorkspaceColorTagFallbackIdentity(row)
+    const forIdentity = row.identity?.key ?? occupant
+    if (canonical === fallback) {
+      entries.push({ identity: canonical, colorTag, forIdentity })
+      continue
+    }
+    entries.push({ identity: canonical, colorTag }, { identity: fallback, colorTag, forIdentity })
+  }
+  return entries
+}
+
+/** Both keys of every row, deduplicated; what a clear must cover after previewing these rows. */
+export function workspaceColorTagPreviewKeysFor(rows: readonly PreviewedWorktree[]): string[] {
+  return [
+    ...new Set(
+      rows.flatMap((row) => [
+        getWorkspaceColorTagIdentity(row),
+        getWorkspaceColorTagFallbackIdentity(row)
+      ])
+    )
+  ]
+}
+
+/** Previews `colorTag` on every representation of these rows in one broadcast. */
+export function previewWorkspaceColorTagsFor(
+  rows: readonly PreviewedWorktree[],
+  colorTag: string | null,
+  owner: WorkspaceColorTagPreviewOwner,
+  occupant?: string
+): void {
+  applyPreviewEntries(previewEntriesFor(rows, colorTag, occupant), owner)
+}
+
+export function clearWorkspaceColorTagPreviewsFor(
+  rows: readonly PreviewedWorktree[],
+  owner: WorkspaceColorTagPreviewOwner
+): void {
+  clearWorkspaceColorTagPreviews(workspaceColorTagPreviewKeysFor(rows), owner)
 }
 
 /** Removes only this owner's layer; whatever another holder set above or beneath it stays. */

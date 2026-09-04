@@ -7,7 +7,8 @@ import {
 import {
   clearWorkspaceColorTagPreviews,
   createWorkspaceColorTagPreviewOwner,
-  setWorkspaceColorTagPreviews,
+  previewWorkspaceColorTagsFor,
+  workspaceColorTagPreviewKeysFor,
   type WorkspaceColorTagPreviewOwner
 } from './workspace-color-tag-preview'
 
@@ -40,6 +41,8 @@ type IdentityQueue = {
   canonicalRow: Worktree | undefined
   /** Every key this queue has previewed under; cleared together once the queue drains. */
   previewIdentities: Set<string>
+  /** Every representation that has enqueued here, by canonical key; all of them show the newest color. */
+  previewRows: Map<string, Worktree>
   /**
    * Why preview from here: a folder workspace on a paired runtime has no optimistic store apply and
    * can wait the full RPC timeout, so the card would show the old strip with no feedback. The pending
@@ -101,19 +104,21 @@ function enqueue(
   onError: (message: string) => void
 ): Promise<void> {
   const current = queueFor(worktree)
-  // Why both keys: a not-yet-refreshed copy of this row still reads the channel under its
-  // pre-identity key, and it must show the pending color for the whole write, not the old strip.
-  const canonicalKey = getWorkspaceColorTagIdentity(worktree)
-  const fallbackKey = getWorkspaceColorTagFallbackIdentity(worktree)
-  current.previewIdentities.add(canonicalKey)
-  setWorkspaceColorTagPreviews([canonicalKey], colorTag, current.previewOwner)
-  if (fallbackKey !== canonicalKey) {
-    // Why scoped: a checkout replaced at this path must not show this row's pending color.
-    current.previewIdentities.add(fallbackKey)
-    setWorkspaceColorTagPreviews([fallbackKey], colorTag, current.previewOwner, {
-      forIdentity: worktree.identity?.key
-    })
+  // Why every row the queue has seen: the canonical row and a copy that has not refreshed yet are
+  // one workspace, and whichever of them enqueues the newest color, both must show it at once rather
+  // than after the next round trip. Pre-identity keys stay scoped to the occupant the queue knows,
+  // so a checkout replaced at this path never shows this row's pending color.
+  current.previewRows.set(getWorkspaceColorTagIdentity(worktree), worktree)
+  const rows = [...current.previewRows.values()]
+  for (const key of workspaceColorTagPreviewKeysFor(rows)) {
+    current.previewIdentities.add(key)
   }
+  previewWorkspaceColorTagsFor(
+    rows,
+    colorTag,
+    current.previewOwner,
+    current.canonicalRow?.identity?.key
+  )
   return new Promise<void>((resolve) => {
     // Latest wins: a newer value replaces an older pending one, and the older assignment's waiters
     // settle when the newer write lands — any later state satisfies them.
@@ -157,6 +162,7 @@ function queueFor(worktree: Worktree): IdentityQueue {
     pending: undefined,
     canonicalRow: canonical === undefined ? undefined : worktree,
     previewIdentities: new Set(),
+    previewRows: new Map(),
     previewOwner: createWorkspaceColorTagPreviewOwner(),
     fallbackKey: fallback,
     sequence: ++nextQueueSequence
@@ -178,6 +184,7 @@ function drain(queue: IdentityQueue, write: WorkspaceColorTagWriter): void {
     queue.inFlight = false
     clearWorkspaceColorTagPreviews([...queue.previewIdentities], queue.previewOwner)
     queue.previewIdentities.clear()
+    queue.previewRows.clear()
     for (const [key, registered] of queues) {
       if (registered === queue) {
         queues.delete(key)
