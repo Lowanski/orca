@@ -76,7 +76,8 @@ describe('workspace color tag preview readers across identity promotion', () => 
     expect(result.current).toEqual([undefined, undefined])
     act(() => setWorkspaceColorTagPreviews(['k-promo'], '#22c55e', owner))
     expect(result.current).toEqual(['#22c55e', undefined])
-    act(() => setWorkspaceColorTagPreviews([fallbackKey], null, owner))
+    // A later pre-identity layer set for another occupant does not apply to the promoted row.
+    act(() => setWorkspaceColorTagPreviews([fallbackKey], null, owner, { forIdentity: 'k-other' }))
     expect(result.current).toEqual(['#22c55e', null])
   })
 })
@@ -106,6 +107,28 @@ describe('previewWorkspaceColorTagsFor', () => {
     clearWorkspaceColorTagPreviewsFor([promoted], owner)
     expect(readWorkspaceColorTagPreview(promoted)).toBeUndefined()
     expect(readWorkspaceColorTagPreview(copy)).toBeUndefined()
+  })
+
+  // Regression: the reader returned the canonical key's layer unconditionally, so an older pending
+  // write's preview hid a newer picker preview published from an identity-less copy of the row.
+  it('shows the newest layer across both keys, whichever key it lives under', () => {
+    const pending = createWorkspaceColorTagPreviewOwner()
+    const picker = createWorkspaceColorTagPreviewOwner()
+    try {
+      setWorkspaceColorTagPreviews(['k-p'], '#111111', pending)
+      previewWorkspaceColorTagsFor([copy], '#222222', picker)
+      expect(readWorkspaceColorTagPreview(promoted)).toBe('#222222')
+      expect(readWorkspaceColorTagPreview(copy)).toBe('#222222')
+      clearWorkspaceColorTagPreviewsFor([copy], picker)
+      expect(readWorkspaceColorTagPreview(promoted)).toBe('#111111')
+      setWorkspaceColorTagPreviews(['k-p'], '#333333', pending)
+      previewWorkspaceColorTagsFor([copy], '#444444', picker)
+      setWorkspaceColorTagPreviews(['k-p'], '#555555', pending)
+      expect(readWorkspaceColorTagPreview(promoted)).toBe('#555555')
+    } finally {
+      clearWorkspaceColorTagPreviews(['k-p'], pending)
+      clearWorkspaceColorTagPreviewsFor([copy], picker)
+    }
   })
 
   it('scopes an identity-less row to the occupant its caller knows', () => {

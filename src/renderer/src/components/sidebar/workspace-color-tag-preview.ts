@@ -40,7 +40,10 @@ type PreviewLayer = {
   owner: WorkspaceColorTagPreviewOwner
   /** The canonical identity this layer was set on behalf of, when a fallback-key layer knows it. */
   forIdentity?: string
+  /** Set order across every key; the reader picks the newest applicable layer across a row's keys. */
+  sequence: number
 }
+let nextLayerSequence = 0
 
 export type WorkspaceColorTagPreviewScope = {
   /** Why: a checkout replaced at the same path must not read its predecessor's fallback layer. */
@@ -86,7 +89,7 @@ function applyPreviewEntries(
     if (index !== -1) {
       layers.splice(index, 1)
     }
-    layers.push({ colorTag, owner, forIdentity })
+    layers.push({ colorTag, owner, forIdentity, sequence: ++nextLayerSequence })
     previews.set(identity, layers)
     changed = true
   }
@@ -199,24 +202,29 @@ function subscribe(listener: () => void): () => void {
 export function readWorkspaceColorTagPreview(
   worktree: PreviewedWorktree
 ): string | null | undefined {
-  const canonical = topLayer(getWorkspaceColorTagIdentity(worktree))
-  if (canonical !== undefined) {
-    return canonical
-  }
+  const canonical = previews.get(getWorkspaceColorTagIdentity(worktree))?.at(-1)
   // Why filter: a fallback layer set on behalf of another identity belongs to a previous occupant
   // of this path; a row with its own identity must not show it. A row without one cannot tell.
   const own = worktree.identity?.key
   const layers = previews.get(getWorkspaceColorTagFallbackIdentity(worktree)) ?? []
+  let fallback: PreviewLayer | undefined
   for (let index = layers.length - 1; index >= 0; index -= 1) {
     const layer = layers[index]
-    if (!layer) {
-      continue
-    }
-    if (own === undefined || layer.forIdentity === undefined || layer.forIdentity === own) {
-      return layer.colorTag
+    if (
+      layer &&
+      (own === undefined || layer.forIdentity === undefined || layer.forIdentity === own)
+    ) {
+      fallback = layer
+      break
     }
   }
-  return undefined
+  // Why the newest across both keys: a pending write can sit under the canonical key while a newer
+  // picker preview from an identity-less copy of the row sits under the pre-identity key; both
+  // representations must show the newer one, not each its own.
+  if (canonical && fallback) {
+    return canonical.sequence >= fallback.sequence ? canonical.colorTag : fallback.colorTag
+  }
+  return (canonical ?? fallback)?.colorTag
 }
 
 /** The previewed color for this card, or undefined when nothing is being previewed. */
