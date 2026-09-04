@@ -20,7 +20,6 @@ import {
   hasHostedReviewLinkUpdates
 } from './hosted-review-link-mutation'
 import { normalizeHostedReviewLinkReplacementUpdates } from './hosted-review-link-update-normalization'
-import type {} from './hosted-review-push-target'
 import { persistWorktreeMeta } from './worktree-meta-persist'
 import { resolveHostedReviewPushTargetUpdate } from './hosted-review-push-target-resolution'
 import { updateFolderWorkspaceMeta } from './update-folder-workspace-meta'
