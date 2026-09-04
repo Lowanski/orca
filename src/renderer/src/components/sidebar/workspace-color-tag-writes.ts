@@ -1,6 +1,6 @@
 import type { ExecutionHostId } from '../../../../shared/execution-host'
 import type { Worktree } from '../../../../shared/worktree/types'
-import { getWorktreeHostIdentity } from '../../../../shared/worktree/host-qualified-identity'
+import { getWorkspaceColorTagIdentity } from '../../../../shared/workspace-color-tag'
 
 type WorktreeMetaWriteResult = { ok: true } | { ok: false; error: string }
 
@@ -26,7 +26,7 @@ type IdentityQueue = { inFlight: boolean; pending: PendingWrite | undefined }
  *
  * Why module-level: each card mounts its own menu hook, so a per-hook queue lets A's menu and B's
  * menu write the same workspace concurrently and an older request that settles last wins. One
- * queue per host-qualified identity serializes writes to a workspace no matter which card issued
+ * queue per canonical identity serializes writes to a workspace no matter which card issued
  * them; the newest pending color for that workspace is what gets written when the in-flight one
  * lands. Nothing here touches the store directly — the writer is injected.
  */
@@ -62,7 +62,7 @@ function enqueue(
   write: WorkspaceColorTagWriter,
   onError: (message: string) => void
 ): Promise<void> {
-  const identity = getWorktreeHostIdentity(worktree)
+  const identity = getWorkspaceColorTagIdentity(worktree)
   let queue = queues.get(identity)
   if (!queue) {
     queue = { inFlight: false, pending: undefined }

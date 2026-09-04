@@ -61,7 +61,8 @@ export function preserveConcurrentColorTag<T extends Worktree>(
   incoming: readonly T[],
   requestStarted: readonly Worktree[] | undefined,
   current: readonly Worktree[] | undefined,
-  matchesRefreshHost: (worktree: Worktree) => boolean
+  matchesRefreshHost: (worktree: Worktree) => boolean,
+  requestStartedAt?: number
 ): T[] {
   if (!requestStarted || !current) {
     return [...incoming]
@@ -83,7 +84,7 @@ export function preserveConcurrentColorTag<T extends Worktree>(
     // in-flight write tells the stale answer apart. Color writes emit no local invalidation, so
     // without this the old tag would stick until an unrelated refresh.
     if (
-      isColorTagPersistencePending(worktree.id, latest.hostId) ||
+      isColorTagPersistencePending(worktree.id, latest.hostId, requestStartedAt) ||
       (started.colorTag ?? null) !== (latest.colorTag ?? null)
     ) {
       return { ...worktree, colorTag: latest.colorTag ?? null }
@@ -200,7 +201,8 @@ export function mergeFetchedWorktrees(
           ),
           args.requestStartedWorktrees,
           currentWorktrees,
-          (worktree) => worktreeMatchesHost(worktree, args.hostId, matchOptions)
+          (worktree) => worktreeMatchesHost(worktree, args.hostId, matchOptions),
+          args.requestStartedAt
         ),
         args.requestStartedWorktrees,
         currentWorktrees,

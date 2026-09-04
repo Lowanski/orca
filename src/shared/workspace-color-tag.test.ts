@@ -4,6 +4,7 @@ import {
   isPresetWorkspaceColorTag,
   normalizeWorkspaceColorTag,
   getSharedWorkspaceColorTag,
+  getWorkspaceColorTagIdentity,
   isMixedWorkspaceColorTagSelection,
   resolveWorkspaceColorTagSelection,
   WORKSPACE_COLOR_TAG_SWATCHES
@@ -113,5 +114,25 @@ describe('isMixedWorkspaceColorTagSelection', () => {
     const tags = ['#ef4444', '#22c55e']
     expect(isMixedWorkspaceColorTagSelection(tags)).toBe(true)
     expect(getSharedWorkspaceColorTag(tags)).toBeNull()
+  })
+})
+
+describe('getWorkspaceColorTagIdentity', () => {
+  // Why: one nested-SSH worktree published through two paired runtimes yields two rows with the
+  // same id and host; keying on host identity alone would preview and queue them as one.
+  it('prefers the canonical identity when the row carries one', () => {
+    const a = { id: 'repo::w', hostId: 'ssh:box', identity: { key: 'ssh:box|inst-1|repo::w' } }
+    const b = { id: 'repo::w', hostId: 'ssh:box', identity: { key: 'ssh:box|inst-2|repo::w' } }
+    expect(getWorkspaceColorTagIdentity(a as never)).toBe('ssh:box|inst-1|repo::w')
+    expect(getWorkspaceColorTagIdentity(a as never)).not.toBe(
+      getWorkspaceColorTagIdentity(b as never)
+    )
+  })
+
+  it('falls back to the host-qualified identity for rows without one', () => {
+    const local = getWorkspaceColorTagIdentity({ id: 'repo::w', hostId: undefined } as never)
+    const remote = getWorkspaceColorTagIdentity({ id: 'repo::w', hostId: 'ssh:box' } as never)
+    expect(local).not.toBe(remote)
+    expect(local).toContain('repo::w')
   })
 })

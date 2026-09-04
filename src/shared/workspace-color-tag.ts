@@ -1,4 +1,6 @@
 import { DEFAULT_REPO_BADGE_COLOR, REPO_COLORS } from './constants'
+import type { Worktree } from './worktree/types'
+import { getWorktreeHostIdentity } from './worktree/host-qualified-identity'
 import { normalizeHexColor } from './hex-color'
 
 /** Assignable swatches, sharing the repo palette so one color language runs across the app.
@@ -49,4 +51,13 @@ export function isMixedWorkspaceColorTagSelection(
   colorTags: readonly (string | null | undefined)[]
 ): boolean {
   return new Set(colorTags.map((tag) => normalizeWorkspaceColorTag(tag))).size > 1
+}
+
+/** The key a color tag is previewed and written under. Prefers the canonical identity so two rows
+ *  for one nested-SSH worktree published through different paired runtimes stay distinct; falls
+ *  back to the host-qualified identity for rows that predate identities. */
+export function getWorkspaceColorTagIdentity(
+  worktree: Pick<Worktree, 'id' | 'hostId' | 'identity'>
+): string {
+  return worktree.identity?.key ?? getWorktreeHostIdentity(worktree)
 }

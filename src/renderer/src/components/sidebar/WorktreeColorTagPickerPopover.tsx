@@ -1,8 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { HexColorPicker } from 'react-colorful'
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react'
 
+import { ColorPickerFields } from '@/components/ui/color-picker'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
-import { Input } from '@/components/ui/input'
 import { translate } from '@/i18n/i18n'
 import {
   normalizeWorkspaceColorTag,
@@ -61,6 +60,7 @@ function WorktreeColorTagPickerFields({
   const [draft, setDraft] = useState(initialColor)
   const [lastValid, setLastValid] = useState<string | null>(null)
   const [owner] = useState(() => createWorkspaceColorTagPreviewOwner())
+  const inputId = useId()
 
   useEffect(() => {
     previewOwnerRef.current = owner
@@ -85,12 +85,12 @@ function WorktreeColorTagPickerFields({
 
   // The wheel only ever renders a complete color: the draft if it parses, else the last one that did.
   const wheelColor = normalizeWorkspaceColorTag(draft) ?? lastValid ?? initialColor
+  const hasInvalidDraft = draft.trim().length > 0 && normalizeWorkspaceColorTag(draft) === null
 
   return (
     // Why here: Radix focuses the wheel first, and a keyboard user who just set a hue with the
     // arrows expects Enter to commit from there, not only from the field.
     <div
-      className="space-y-2"
       onKeyDown={(event) => {
         if (event.key === 'Enter') {
           event.preventDefault()
@@ -98,12 +98,25 @@ function WorktreeColorTagPickerFields({
         }
       }}
     >
-      <HexColorPicker color={wheelColor} onChange={preview} />
-      <Input
-        value={draft}
-        onChange={(event) => preview(event.target.value)}
-        aria-label={translate('auto.components.sidebar.WorktreeColorTagMenuItems.hex', 'Hex color')}
-        className="h-7 w-full text-xs"
+      <ColorPickerFields
+        label={translate(
+          'auto.components.sidebar.WorktreeColorTagMenuItems.custom',
+          'Custom color'
+        )}
+        inputId={inputId}
+        wheelColor={wheelColor}
+        draft={draft}
+        hasInvalidDraft={hasInvalidDraft}
+        placeholder={wheelColor}
+        onWheelChange={preview}
+        onDraftChange={preview}
+        // Why: leaving the field with a half-typed value snaps it back to what the card shows,
+        // matching the repo badge picker; the card itself never saw the partial value.
+        onDraftBlur={() => {
+          if (hasInvalidDraft) {
+            setDraft(wheelColor)
+          }
+        }}
       />
     </div>
   )
@@ -214,7 +227,7 @@ export function WorktreeColorTagPickerPopover({
       </PopoverAnchor>
       <PopoverContent
         align="start"
-        className="w-auto p-2"
+        className="w-64 p-3"
         onEscapeKeyDown={(event) => {
           event.preventDefault()
           cancel()

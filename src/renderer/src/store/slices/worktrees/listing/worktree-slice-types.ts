@@ -91,6 +91,8 @@ export type FencedWorktreeMergeArgs = {
   ownerWasMissingAtStart: boolean
   missingDirectSshOwnerReposSnapshot?: AppState['repos']
   requestStartedWorktrees: readonly Worktree[] | undefined
+  /** When the fetch began; lets a field fence tell a listing that predates a write's landing apart. */
+  requestStartedAt?: number
   setup?: ProjectHostSetup
   refresh: AdmittedDetectedWorktreeRefresh
   purgeRemovedWorktrees?: boolean

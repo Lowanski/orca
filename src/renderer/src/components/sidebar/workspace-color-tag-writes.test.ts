@@ -91,6 +91,23 @@ describe('assignWorkspaceColorTags', () => {
     settleAll()
   })
 
+  it('keeps two runtime-scoped rows for one worktree in separate queues', () => {
+    const { write, settleAll } = deferredWriter()
+    const viaRuntimeA = {
+      id: 'nested::w',
+      hostId: 'ssh:box',
+      identity: { key: 'k-a' }
+    } as unknown as Worktree
+    const viaRuntimeB = {
+      id: 'nested::w',
+      hostId: 'ssh:box',
+      identity: { key: 'k-b' }
+    } as unknown as Worktree
+    void assignWorkspaceColorTags([viaRuntimeA, viaRuntimeB], '#111111', write, vi.fn())
+    expect(write).toHaveBeenCalledTimes(2)
+    settleAll()
+  })
+
   // Regression: the picker dropped its preview the instant it closed, and a folder or queued write
   // only reaches the store when it lands, so the card snapped back for the whole round trip.
   it('resolves only after the write has landed', async () => {

@@ -3,9 +3,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Worktree } from '../../../../shared/worktree/types'
 import {
   getSharedWorkspaceColorTag,
+  getWorkspaceColorTagIdentity,
   isMixedWorkspaceColorTagSelection
 } from '../../../../shared/workspace-color-tag'
-import { getWorktreeHostIdentity } from '../../../../shared/worktree/host-qualified-identity'
 import { DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { WorktreeColorTagMenuItems } from './WorktreeColorTagMenuItems'
 import { WorktreeColorTagPickerPopover } from './WorktreeColorTagPickerPopover'
@@ -153,7 +153,7 @@ export function useWorktreeColorTagPicker({
     [pickerTargets]
   )
   const previewIdentities = useMemo(
-    () => pickerTargets.map((item) => getWorktreeHostIdentity(item)),
+    () => pickerTargets.map((item) => getWorkspaceColorTagIdentity(item)),
     [pickerTargets]
   )
   const commitPickerColorTag = useCallback(

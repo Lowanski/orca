@@ -202,6 +202,7 @@ export function acquireDirectSshDetectedWorktreeRefresh(
 ): DirectSshDetectedWorktreeRefresh {
   const requestStartedState = store.getState()
   const requestStartedWorktrees = requestStartedState.worktreesByRepo[request.repoId]
+  const requestStartedAt = Date.now()
   const ownerWasMissingAtStart = !requestStartedState.repos.some(
     (repo) => repo.id === request.repoId
   )
@@ -265,6 +266,7 @@ export function acquireDirectSshDetectedWorktreeRefresh(
           hostId: request.executionHostId,
           ownerWasMissingAtStart,
           requestStartedWorktrees,
+          requestStartedAt,
           setup,
           refresh
         }
