@@ -70,6 +70,9 @@ export type WorktreeMetaUpdateOptions = {
   /** Pins the exact row when locator plus host still match several — one nested-SSH checkout
    *  published through two paired runtimes. Also routes persistence through that identity. */
   identityKey?: string
+  /** The row's paired-runtime owner, for rows that have no canonical identity yet (detected-only
+   *  nested-SSH rows). Narrows the optimistic apply and routes persistence through that runtime. */
+  runtimeOwnerEnvironmentId?: string
   shouldApply?: WorktreeMetaUpdateGuard
   /** Skip the automatic review refetch when the caller owns an equivalent refresh. */
   suppressHostedReviewRefresh?: boolean

@@ -54,10 +54,17 @@ export function isMixedWorkspaceColorTagSelection(
 }
 
 /** The key a color tag is previewed and written under. Prefers the canonical identity so two rows
- *  for one nested-SSH worktree published through different paired runtimes stay distinct; falls
- *  back to the host-qualified identity for rows that predate identities. */
+ *  for one nested-SSH worktree published through different paired runtimes stay distinct; before a
+ *  row has an identity, the runtime owner separates them; host-qualified identity is the last
+ *  resort for rows that predate both. */
 export function getWorkspaceColorTagIdentity(
-  worktree: Pick<Worktree, 'id' | 'hostId' | 'identity'>
+  worktree: Pick<Worktree, 'id' | 'hostId' | 'identity' | 'runtimeOwnerEnvironmentId'>
 ): string {
-  return worktree.identity?.key ?? getWorktreeHostIdentity(worktree)
+  if (worktree.identity?.key) {
+    return worktree.identity.key
+  }
+  const hostIdentity = getWorktreeHostIdentity(worktree)
+  return worktree.runtimeOwnerEnvironmentId
+    ? `${hostIdentity}@${worktree.runtimeOwnerEnvironmentId}`
+    : hostIdentity
 }

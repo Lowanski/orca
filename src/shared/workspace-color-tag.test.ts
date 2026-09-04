@@ -129,6 +129,16 @@ describe('getWorkspaceColorTagIdentity', () => {
     )
   })
 
+  // Why: a detected-only nested-SSH row has no canonical identity yet; two HUBs exposing the same
+  // checkout must still preview and queue as two rows.
+  it('separates identity-less rows by runtime owner', () => {
+    const viaA = { id: 'repo::w', hostId: 'ssh:box', runtimeOwnerEnvironmentId: 'env-a' }
+    const viaB = { id: 'repo::w', hostId: 'ssh:box', runtimeOwnerEnvironmentId: 'env-b' }
+    expect(getWorkspaceColorTagIdentity(viaA as never)).not.toBe(
+      getWorkspaceColorTagIdentity(viaB as never)
+    )
+  })
+
   it('falls back to the host-qualified identity for rows without one', () => {
     const local = getWorkspaceColorTagIdentity({ id: 'repo::w', hostId: undefined } as never)
     const remote = getWorkspaceColorTagIdentity({ id: 'repo::w', hostId: 'ssh:box' } as never)

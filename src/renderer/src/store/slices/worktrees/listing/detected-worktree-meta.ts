@@ -28,7 +28,8 @@ export function applyDetectedWorktreeUpdates(
   worktreeId: string,
   rawUpdates: Partial<WorktreeMeta>,
   executionHostId?: ExecutionHostId,
-  identityKey?: string
+  identityKey?: string,
+  runtimeOwnerEnvironmentId?: string
 ): AppState['detectedWorktreesByRepo'] {
   // Why: mirrors applyWorktreeUpdates — detected rows feed the same palette.
   const updates = withoutErasedRequiredWorktreeFields(rawUpdates)
@@ -41,7 +42,9 @@ export function applyDetectedWorktreeUpdates(
       if (
         worktree.id !== worktreeId ||
         !worktreeRowMatchesMetaHost(worktree, executionHostId) ||
-        (identityKey !== undefined && worktree.identity?.key !== identityKey)
+        (identityKey !== undefined && worktree.identity?.key !== identityKey) ||
+        (runtimeOwnerEnvironmentId !== undefined &&
+          worktree.runtimeOwnerEnvironmentId !== runtimeOwnerEnvironmentId)
       ) {
         return worktree
       }

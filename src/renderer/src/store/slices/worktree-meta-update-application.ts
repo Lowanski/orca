@@ -45,7 +45,8 @@ export function applyWorktreeUpdates(
   worktreeId: string,
   rawUpdates: Partial<WorktreeMeta>,
   executionHostId?: ExecutionHostId,
-  identityKey?: string
+  identityKey?: string,
+  runtimeOwnerEnvironmentId?: string
 ): Record<string, Worktree[]> {
   const updates = withoutErasedRequiredWorktreeFields(rawUpdates)
   const repoId = getRepoIdFromWorktreeId(worktreeId)
@@ -61,7 +62,9 @@ export function applyWorktreeUpdates(
       !worktreeRowMatchesMetaHost(worktree, executionHostId) ||
       // Why: two paired runtimes can publish one checkout as two rows with the same id and host;
       // an identity-pinned update must land on exactly the row that asked for it.
-      (identityKey !== undefined && worktree.identity?.key !== identityKey)
+      (identityKey !== undefined && worktree.identity?.key !== identityKey) ||
+      (runtimeOwnerEnvironmentId !== undefined &&
+        worktree.runtimeOwnerEnvironmentId !== runtimeOwnerEnvironmentId)
     ) {
       return worktree
     }

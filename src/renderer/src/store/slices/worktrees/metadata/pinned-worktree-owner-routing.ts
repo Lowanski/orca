@@ -31,8 +31,23 @@ export function resolvePinnedOwnerRouting(
   settings: AppState['settings'],
   requestedIdentityKey: string | undefined,
   pinnedCandidate: ReturnType<typeof findKnownWorktreeById>,
-  executionHostId: ExecutionHostId | undefined
+  executionHostId: ExecutionHostId | undefined,
+  /** Owner named by the caller for a row that has no canonical identity yet. */
+  requestedRuntimeOwnerEnvironmentId?: string
 ): PinnedOwnerRouting {
+  // Why the second clause: a detected-only nested-SSH row carries no identity, but the caller
+  // knows which HUB it came from, and that alone is enough to route the write correctly.
+  if (requestedIdentityKey === undefined && requestedRuntimeOwnerEnvironmentId !== undefined) {
+    return {
+      pinnedSettings: settingsForRuntimeEnvironmentOwner(
+        settings,
+        requestedRuntimeOwnerEnvironmentId
+      ),
+      recoveryFetchOptions: {
+        executionHostId: toRuntimeExecutionHostId(requestedRuntimeOwnerEnvironmentId)
+      }
+    }
+  }
   if (requestedIdentityKey === undefined || !pinnedCandidate) {
     return { pinnedSettings: undefined, recoveryFetchOptions: undefined }
   }

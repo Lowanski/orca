@@ -1,4 +1,5 @@
 import type { Worktree } from '../../../../../../shared/worktree/types'
+import { getWorkspaceColorTagIdentity } from '../../../../../../shared/workspace-color-tag'
 import { isColorTagPersistencePending } from '../metadata/worktree-meta-persist'
 import type { FencedWorktreeMergeArgs } from './worktree-slice-types'
 
@@ -71,7 +72,9 @@ export function fenceStartedAt(args: FencedWorktreeMergeArgs): number | undefine
  * Visible rows plus any detected-only rows for the same repository. Why: a workspace that exists
  * only in the detected catalog — a hidden external worktree colored from the Agent Map — has no
  * row in the visible list, so a fence fed only that list cannot find it and lets a stale listing
- * undo its assignment.
+ * undo its assignment. Deduplicated by color-tag identity, never by bare id: a visible row on host
+ * A and a detected-only row on host B can share a path-derived id, and dropping B here would leave
+ * a B refresh without the snapshot it needs.
  */
 export function withDetectedOnlyRows(
   visible: readonly Worktree[] | undefined,
@@ -80,6 +83,9 @@ export function withDetectedOnlyRows(
   if (!detected || detected.length === 0) {
     return visible
   }
-  const seen = new Set((visible ?? []).map((worktree) => worktree.id))
-  return [...(visible ?? []), ...detected.filter((worktree) => !seen.has(worktree.id))]
+  const seen = new Set((visible ?? []).map((worktree) => getWorkspaceColorTagIdentity(worktree)))
+  return [
+    ...(visible ?? []),
+    ...detected.filter((worktree) => !seen.has(getWorkspaceColorTagIdentity(worktree)))
+  ]
 }
