@@ -57,6 +57,7 @@ export function normalizeFolderWorkspaces(
     const linkedTask = normalizeWorkspaceLinkedItem(raw.linkedTask)
     const linkedTaskSourceContext = normalizeStoredTaskSourceContext(raw.linkedTaskSourceContext)
     const creatorProvenance = normalizeWorkspaceCreatorProvenance(raw.creatorProvenance)
+    const colorTag = normalizeWorkspaceColorTag(raw.colorTag)
     seen.add(raw.id)
     // Why: `executionHostId` is deliberately NOT persisted. It is a fetch-time renderer
     // stamp that can name a `runtime:*` authority the desktop store does not own, and it
@@ -92,9 +93,7 @@ export function normalizeFolderWorkspaces(
       ...(typeof raw.workspaceStatus === 'string' && raw.workspaceStatus.trim().length > 0
         ? { workspaceStatus: raw.workspaceStatus }
         : {}),
-      ...(normalizeWorkspaceColorTag(raw.colorTag) !== null
-        ? { colorTag: normalizeWorkspaceColorTag(raw.colorTag) }
-        : {}),
+      ...(colorTag !== null ? { colorTag } : {}),
       ...(isTuiAgent(raw.createdWithAgent) ? { createdWithAgent: raw.createdWithAgent } : {}),
       ...(raw.pendingFirstAgentMessageRename === true
         ? { pendingFirstAgentMessageRename: true }

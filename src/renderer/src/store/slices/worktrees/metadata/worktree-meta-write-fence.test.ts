@@ -175,6 +175,15 @@ describe('MetaWriteFence', () => {
     expect(onHeldListing).not.toHaveBeenCalled()
   })
 
+  it('clear drops every entry', () => {
+    const { fence } = fenceAt(1000)
+    fence.begin('w', 'local').landed()
+    fence.begin('x', 'local')
+    fence.clear()
+    expect(fence.isPending('w', 'local', 500)).toBe(false)
+    expect(fence.isPending('x', 'local')).toBe(false)
+  })
+
   it('matches a host-agnostic query against a host-scoped entry and vice versa', () => {
     const { fence } = fenceAt(1000)
     fence.begin('w', 'ssh:box')

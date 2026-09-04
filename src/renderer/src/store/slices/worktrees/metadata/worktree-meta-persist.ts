@@ -93,6 +93,12 @@ export function isColorTagPersistencePending(
   )
 }
 
+/** Test-only: both trackers are module-level and would otherwise leak from one test into the next. */
+export function resetWorktreeMetaWriteTrackingForTests(): void {
+  colorTagWriteFence.clear()
+  pendingDisplayNameWrites.clear()
+}
+
 export function persistWorktreeMeta(
   settings: AppState['settings'],
   worktreeId: string,

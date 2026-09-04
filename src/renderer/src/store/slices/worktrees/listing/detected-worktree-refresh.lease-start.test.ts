@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { rememberLeaseStart } from './detected-worktree-refresh'
+import { forgetLeaseStart, rememberLeaseStart } from './detected-worktree-refresh'
 
 describe('rememberLeaseStart', () => {
   afterEach(() => vi.useRealTimers())
@@ -16,6 +16,23 @@ describe('rememberLeaseStart', () => {
 
     expect(first).toBe(1_000)
     expect(joiner).toBe(1_000)
+  })
+
+  // Regression: entries expired by wall clock alone, so a joiner of a scan still running after
+  // 60 s recorded a later start and a stale listing outranked a color written mid-scan.
+  it('keeps the first clock while any holder is active and forgets it on the last release', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    expect(rememberLeaseStart('req-long')).toBe(1_000)
+    vi.setSystemTime(1_000 + 5 * 60_000)
+    expect(rememberLeaseStart('req-long')).toBe(1_000)
+    forgetLeaseStart('req-long')
+    expect(rememberLeaseStart('req-long')).toBe(1_000)
+    forgetLeaseStart('req-long')
+    forgetLeaseStart('req-long')
+    vi.setSystemTime(2_000_000)
+    expect(rememberLeaseStart('req-long')).toBe(2_000_000)
+    forgetLeaseStart('req-long')
   })
 
   it('records a fresh start for a different request', () => {

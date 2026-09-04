@@ -197,69 +197,89 @@ export async function listDetectedWorktreesForRepoCoalesced(
 
   const lease = acquireDetectedWorktreeRefreshLeaseForRepo(settings, repoId, options)
   const startedAt = rememberLeaseStart(lease.providerRequestId)
-  let providerResult: HostQualifiedDetectedWorktreeResult
   try {
-    providerResult = await lease.result
-  } catch {
-    return {
-      status: 'not-admitted',
-      providerResult: {
-        providerRequestId: lease.providerRequestId,
+    let providerResult: HostQualifiedDetectedWorktreeResult
+    try {
+      providerResult = await lease.result
+    } catch {
+      return {
+        status: 'not-admitted',
+        providerResult: {
+          providerRequestId: lease.providerRequestId,
+          executionHostId: options.executionHostId,
+          status: 'rejected'
+        },
         executionHostId: options.executionHostId,
-        status: 'rejected'
-      },
-      executionHostId: options.executionHostId,
-      directSshAuthority: options.directSshAuthority
+        directSshAuthority: options.directSshAuthority
+      }
     }
-  }
-  if (
-    !qualifiedProviderResultIsAdmitted(providerResult, lease.providerRequestId, repoId, options)
-  ) {
+    if (
+      !qualifiedProviderResultIsAdmitted(providerResult, lease.providerRequestId, repoId, options)
+    ) {
+      return {
+        status: 'not-admitted',
+        providerResult: normalizeNotAdmittedProviderResult(
+          providerResult,
+          lease.providerRequestId,
+          options.executionHostId
+        ),
+        executionHostId: options.executionHostId,
+        directSshAuthority: options.directSshAuthority
+      }
+    }
+    await teardownMissingWorktreeTerminalsBestEffort(
+      settings,
+      repoId,
+      options.connectionId,
+      options.knownWorktreeIds,
+      providerResult.result
+    )
     return {
-      status: 'not-admitted',
-      providerResult: normalizeNotAdmittedProviderResult(
-        providerResult,
-        lease.providerRequestId,
-        options.executionHostId
-      ),
+      status: 'admitted',
+      result: providerResult.result,
+      startedAt,
+      providerResult,
       executionHostId: options.executionHostId,
       directSshAuthority: options.directSshAuthority
     }
-  }
-  await teardownMissingWorktreeTerminalsBestEffort(
-    settings,
-    repoId,
-    options.connectionId,
-    options.knownWorktreeIds,
-    providerResult.result
-  )
-  return {
-    status: 'admitted',
-    result: providerResult.result,
-    startedAt,
-    providerResult,
-    executionHostId: options.executionHostId,
-    directSshAuthority: options.directSshAuthority
+  } finally {
+    forgetLeaseStart(lease.providerRequestId)
   }
 }
 
 // Why keyed by provider request: the lease registry hands every joiner the same request id, so
-// the first acquire's clock is the scan's start for all of them. Entries older than any listing
-// could still be are dropped on the way in.
-const LEASE_START_TTL_MS = 60_000
-const leaseStartedAtByRequestId = new Map<string, number>()
+// the first acquire's clock is the scan's start for all of them. An entry lives while any holder
+// still awaits that request and is forgotten when the last one releases it, so a joiner arriving
+// late in a long scan still inherits the original clock. The TTL is only a leak guard for a holder
+// that never releases, set far beyond any listing an active request could still be serving.
+const LEASE_START_TTL_MS = 10 * 60_000
+type LeaseStart = { startedAt: number; holders: number }
+const leaseStartedAtByRequestId = new Map<string, LeaseStart>()
 
 export function rememberLeaseStart(providerRequestId: string): number {
   const now = Date.now()
-  for (const [id, at] of leaseStartedAtByRequestId) {
-    if (now - at > LEASE_START_TTL_MS) {
+  for (const [id, entry] of leaseStartedAtByRequestId) {
+    if (now - entry.startedAt > LEASE_START_TTL_MS) {
       leaseStartedAtByRequestId.delete(id)
     }
   }
   const existing = leaseStartedAtByRequestId.get(providerRequestId)
-  if (existing !== undefined) {
-    return existing
+  if (existing) {
+    existing.holders += 1
+    return existing.startedAt
   }
-  leaseStartedAtByRequestId.set(providerRequestId, now)
+  leaseStartedAtByRequestId.set(providerRequestId, { startedAt: now, holders: 1 })
   return now
+}
+
+/** Pairs with rememberLeaseStart: called once per holder when its provider request has settled. */
+export function forgetLeaseStart(providerRequestId: string): void {
+  const entry = leaseStartedAtByRequestId.get(providerRequestId)
+  if (!entry) {
+    return
+  }
+  entry.holders -= 1
+  if (entry.holders <= 0) {
+    leaseStartedAtByRequestId.delete(providerRequestId)
+  }
 }

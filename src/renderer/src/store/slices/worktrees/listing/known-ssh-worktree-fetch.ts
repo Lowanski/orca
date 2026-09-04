@@ -25,6 +25,7 @@ import {
   acquireDetectedWorktreeRefreshLeaseForRepo,
   normalizeNotAdmittedProviderResult,
   qualifiedProviderResultIsAdmitted,
+  forgetLeaseStart,
   rememberLeaseStart
 } from './detected-worktree-refresh'
 import { isDetectedWorktreeListResult } from './detected-worktree-provider-request'
@@ -234,7 +235,11 @@ export function acquireDirectSshDetectedWorktreeRefresh(
     waiterLeaseId: lease.waiterLeaseId,
     providerRequestId: lease.providerRequestId,
     result: lease.result,
-    release: lease.release,
+    // Why wrap: the last holder to release forgets the scan's clock; see rememberLeaseStart.
+    release: (...args: Parameters<typeof lease.release>) => {
+      forgetLeaseStart(lease.providerRequestId)
+      return lease.release(...args)
+    },
     merge: (providerResult) => {
       if (mergedResult) {
         return mergedResult

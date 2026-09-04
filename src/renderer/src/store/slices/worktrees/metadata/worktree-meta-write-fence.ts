@@ -146,6 +146,11 @@ export class MetaWriteFence {
     queueMicrotask(entry.onHeldListing)
   }
 
+  /** Test-only: drops every entry, so a write landed in one test cannot hold a listing in the next. */
+  clear(): void {
+    this.entries.clear()
+  }
+
   private prune(): void {
     const cutoff = this.now() - RELEASED_ENTRY_TTL_MS
     for (const entry of this.entries) {

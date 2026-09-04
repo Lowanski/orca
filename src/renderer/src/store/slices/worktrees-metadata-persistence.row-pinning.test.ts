@@ -3,6 +3,7 @@ import type { AppState } from '../types'
 import { toRuntimeExecutionHostId } from '../../../../shared/execution-host'
 import { folderWorkspaceKey } from '../../../../shared/workspace-scope'
 import { makeFolderWorkspace, makeWorktree } from './worktrees-slice-test-fixtures'
+import { isColorTagPersistencePending } from './worktrees/metadata/worktree-meta-persist'
 import {
   createTestStore,
   mockApi,
@@ -285,6 +286,47 @@ describe('direct-owner pins for identity-less rows the desktop lists itself', ()
     expect(store.getState().worktreesByRepo.repo1[0]?.colorTag).toBeNull()
     expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
     expect(mockApi.worktrees.updateMeta).not.toHaveBeenCalled()
+  })
+})
+
+describe('batch metadata writes carry the same pin as single-row writes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetRemoteRuntimeMocks()
+  })
+
+  // Regression: the batch path pinned only the identity, so an identity-less row's fence fell back
+  // to id and host and could hold a sibling runtime's refresh, and a held listing was never
+  // reconciled because no refetch hook was passed.
+  it('fences a batch color write by owner and refetches once a listing is held', async () => {
+    const store = createTestStore()
+    const row = makeWorktree({
+      id: 'repo1::/path/batch',
+      repoId: 'repo1',
+      path: '/path/batch',
+      hostId: 'local' as never,
+      colorTag: null
+    })
+    const fetchWorktrees = vi.fn().mockResolvedValue(true)
+    store.setState({
+      worktreesByRepo: { repo1: [row] },
+      fetchWorktrees
+    } as unknown as Partial<AppState>)
+    const before = Date.now() - 1
+
+    await store
+      .getState()
+      .updateWorktreesMeta([
+        { worktreeId: row.id, updates: { colorTag: '#ef4444' }, executionHostId: 'local' as never }
+      ])
+
+    expect(mockApi.worktrees.updateMeta).toHaveBeenCalledTimes(1)
+    expect(isColorTagPersistencePending(row.id, 'local', before, undefined, 'env-other')).toBe(
+      false
+    )
+    expect(isColorTagPersistencePending(row.id, 'local', before, undefined, null)).toBe(true)
+    await Promise.resolve()
+    expect(fetchWorktrees).toHaveBeenCalledWith('repo1', { executionHostId: 'local' })
   })
 })
 

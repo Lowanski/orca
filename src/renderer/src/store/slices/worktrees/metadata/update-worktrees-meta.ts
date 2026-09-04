@@ -100,8 +100,21 @@ export function createUpdateWorktreesMeta(
           const ownerHostIds = executionHostId
             ? [executionHostId]
             : getKnownOwnerHostIds(state, worktreeId)
+          // Why the same pin as the single-row path: an identity-less row's fence would otherwise fall
+          // back to id and host and hold a sibling runtime's refresh, and a held listing would never be
+          // reconciled.
           await (ownerHostIds.length === 0
-            ? persistWorktreeMeta(settingsForWorktreeOwner(state, worktreeId), worktreeId, updates)
+            ? persistWorktreeMeta(
+                settingsForWorktreeOwner(state, worktreeId),
+                worktreeId,
+                updates,
+                undefined,
+                {
+                  onHeldColorTagListing: () => {
+                    void get().fetchWorktrees(getRepoIdFromWorktreeId(worktreeId))
+                  }
+                }
+              )
             : Promise.all(
                 ownerHostIds.map((hostId) => {
                   const worktree = getIndexedWorktreesById(state.worktreesByRepo, worktreeId).find(
@@ -112,7 +125,17 @@ export function createUpdateWorktreesMeta(
                     worktreeId,
                     updates,
                     hostId,
-                    { identityKey: worktree?.identity?.key }
+                    {
+                      identityKey: worktree?.identity?.key,
+                      runtimeOwnerEnvironmentId: worktree
+                        ? (worktree.runtimeOwnerEnvironmentId ?? null)
+                        : undefined,
+                      onHeldColorTagListing: () => {
+                        void get().fetchWorktrees(getRepoIdFromWorktreeId(worktreeId), {
+                          executionHostId: hostId
+                        })
+                      }
+                    }
                   )
                 })
               ))
